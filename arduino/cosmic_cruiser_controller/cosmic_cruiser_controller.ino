@@ -13,6 +13,7 @@
 
 #include <Arduino.h>
 #include <math.h>
+#include <Wire.h>
 
 constexpr uint32_t USB_BAUD = 115200;
 constexpr uint32_t MOUNT_BAUD = 57600;
@@ -24,6 +25,19 @@ constexpr uint32_t QUERY_INTERVAL_MS = 250;
 constexpr uint32_t RESPONSE_TIMEOUT_MS = 80;
 constexpr uint32_t MOTION_TIMEOUT_MS = 240000UL;
 constexpr float DEFAULT_TOLERANCE_DEG = 0.75f;
+constexpr uint32_t BNO_INTERVAL_MS = 200;
+constexpr uint8_t BNO_ADDRESS = 0x28;
+constexpr uint8_t BNO_CHIP_ID_REG = 0x00;
+constexpr uint8_t BNO_CHIP_ID = 0xA0;
+constexpr uint8_t BNO_EULER_H_LSB_REG = 0x1A;
+constexpr uint8_t BNO_CALIB_STAT_REG = 0x35;
+constexpr uint8_t BNO_UNIT_SEL_REG = 0x3B;
+constexpr uint8_t BNO_OPR_MODE_REG = 0x3D;
+constexpr uint8_t BNO_PWR_MODE_REG = 0x3E;
+constexpr uint8_t BNO_SYS_TRIGGER_REG = 0x3F;
+constexpr uint8_t BNO_PAGE_ID_REG = 0x07;
+constexpr uint8_t BNO_MODE_CONFIG = 0x00;
+constexpr uint8_t BNO_MODE_NDOF = 0x0C;
 
 enum Axis : uint8_t {
   AZIMUTH,
@@ -55,8 +69,13 @@ uint8_t activeSpeed = CONFIRMED_MAX_SPEED;
 uint32_t targetCounts = 0;
 uint32_t motionStartedAt = 0;
 uint32_t lastQueryAt = 0;
+uint32_t lastBnoAt = 0;
+uint16_t lastMountRxBytes = 0;
+bool lastMountHadBadCrc = false;
 char consoleLine[80];
 uint8_t consoleLength = 0;
+bool bnoAvailable = false;
+uint8_t bnoReadFailures = 0;
 
 const __FlashStringHelper *axisName(Axis axis) {
   return axis == AZIMUTH ? F("AZIMUTE") : F("ELEVACAO");
@@ -162,10 +181,13 @@ int32_t shortestPositionError(uint32_t target, uint32_t current) {
 
 bool readMountFrame(uint8_t frame[FRAME_SIZE], uint32_t timeoutMs) {
   uint8_t index = 0;
+  lastMountRxBytes = 0;
+  lastMountHadBadCrc = false;
   const uint32_t started = millis();
   while (millis() - started < timeoutMs) {
     while (Serial1.available()) {
       const uint8_t value = Serial1.read();
+      ++lastMountRxBytes;
       if (index == 0 && value != 0x01) continue;
       if (index == 1 && value != 0x01) {
         index = value == 0x01 ? 1 : 0;
@@ -179,7 +201,9 @@ bool readMountFrame(uint8_t frame[FRAME_SIZE], uint32_t timeoutMs) {
       if (index == FRAME_SIZE) {
         const uint16_t expected = crc16Kermit(frame, FRAME_SIZE - 2);
         const uint16_t received = frame[12] | (frame[13] << 8);
-        return expected == received;
+        if (expected == received) return true;
+        lastMountHadBadCrc = true;
+        index = 0;
       }
     }
   }
@@ -198,12 +222,128 @@ void printPositions() {
   Serial.println(F(" graus"));
 }
 
+bool bnoWrite8(uint8_t reg, uint8_t value) {
+  Wire.beginTransmission(BNO_ADDRESS);
+  Wire.write(reg);
+  Wire.write(value);
+  return Wire.endTransmission() == 0;
+}
+
+bool bnoRead(uint8_t reg, uint8_t *data, uint8_t length) {
+  Wire.beginTransmission(BNO_ADDRESS);
+  Wire.write(reg);
+  if (Wire.endTransmission(false) != 0) return false;
+  const uint8_t received = Wire.requestFrom(BNO_ADDRESS, length);
+  if (received != length) {
+    while (Wire.available()) Wire.read();
+    return false;
+  }
+  for (uint8_t index = 0; index < length; ++index) {
+    data[index] = Wire.read();
+  }
+  return true;
+}
+
+bool bnoRead8(uint8_t reg, uint8_t &value) {
+  return bnoRead(reg, &value, 1);
+}
+
+bool beginBno() {
+  uint8_t chipId = 0;
+  if (!bnoRead8(BNO_CHIP_ID_REG, chipId) || chipId != BNO_CHIP_ID) {
+    delay(700);
+    if (!bnoRead8(BNO_CHIP_ID_REG, chipId) || chipId != BNO_CHIP_ID) {
+      return false;
+    }
+  }
+
+  // Use o oscilador interno. Muitos módulos econômicos não possuem cristal
+  // externo, embora aceitem o comando que o seleciona.
+  if (!bnoWrite8(BNO_OPR_MODE_REG, BNO_MODE_CONFIG)) return false;
+  delay(25);
+  if (!bnoWrite8(BNO_SYS_TRIGGER_REG, 0x20)) return false;
+  delay(700);
+  if (!bnoRead8(BNO_CHIP_ID_REG, chipId) || chipId != BNO_CHIP_ID) return false;
+  if (!bnoWrite8(BNO_PWR_MODE_REG, 0x00)) return false;
+  delay(10);
+  if (!bnoWrite8(BNO_PAGE_ID_REG, 0x00)) return false;
+  if (!bnoWrite8(BNO_UNIT_SEL_REG, 0x00)) return false;
+  if (!bnoWrite8(BNO_SYS_TRIGGER_REG, 0x00)) return false;
+  if (!bnoWrite8(BNO_OPR_MODE_REG, BNO_MODE_NDOF)) return false;
+  delay(25);
+  return true;
+}
+
+int16_t bnoInt16(const uint8_t *data) {
+  return static_cast<int16_t>(
+    static_cast<uint16_t>(data[0]) |
+    (static_cast<uint16_t>(data[1]) << 8)
+  );
+}
+
+void printBnoOrientation() {
+  if (!bnoAvailable) {
+    Serial.println(F("BNO: INDISPONIVEL"));
+    return;
+  }
+  uint8_t euler[6];
+  uint8_t calibration = 0;
+  if (!bnoRead(BNO_EULER_H_LSB_REG, euler, sizeof(euler)) ||
+      !bnoRead8(BNO_CALIB_STAT_REG, calibration)) {
+    if (bnoReadFailures < 255) ++bnoReadFailures;
+    Serial.print(F("BNO: ERRO I2C "));
+    Serial.println(bnoReadFailures);
+    if (bnoReadFailures >= 5) {
+      Serial.println(F("BNO: reinicializando"));
+      bnoAvailable = beginBno();
+      bnoReadFailures = 0;
+    }
+    return;
+  }
+  bnoReadFailures = 0;
+  const float heading = bnoInt16(&euler[0]) / 16.0f;
+  const float roll = bnoInt16(&euler[2]) / 16.0f;
+  const float pitch = bnoInt16(&euler[4]) / 16.0f;
+  const uint8_t system = (calibration >> 6) & 0x03;
+  const uint8_t gyro = (calibration >> 4) & 0x03;
+  const uint8_t accelerometer = (calibration >> 2) & 0x03;
+  const uint8_t magnetometer = calibration & 0x03;
+  Serial.print(F("BNO: heading "));
+  Serial.print(heading, 2);
+  Serial.print(F(" roll "));
+  Serial.print(roll, 2);
+  Serial.print(F(" pitch "));
+  Serial.print(pitch, 2);
+  Serial.print(F(" CAL sys "));
+  Serial.print(system);
+  Serial.print(F(" gyro "));
+  Serial.print(gyro);
+  Serial.print(F(" accel "));
+  Serial.print(accelerometer);
+  Serial.print(F(" mag "));
+  Serial.println(magnetometer);
+}
+
+void serviceBno() {
+  if (!bnoAvailable) return;
+  if (millis() - lastBnoAt < BNO_INTERVAL_MS) return;
+  lastBnoAt = millis();
+  printBnoOrientation();
+}
+
 bool updatePositions() {
   while (Serial1.available()) Serial1.read();
   sendPositionQuery();
   uint8_t frame[FRAME_SIZE];
   if (!readMountFrame(frame, RESPONSE_TIMEOUT_MS)) {
-    Serial.println(F("AVISO: resposta ausente ou CRC invalido"));
+    if (lastMountRxBytes == 0) {
+      Serial.println(F("AVISO: montagem sem resposta; RX1 recebeu 0 bytes"));
+    } else {
+      Serial.print(F("AVISO: RX1 recebeu "));
+      Serial.print(lastMountRxBytes);
+      Serial.print(F(" bytes; quadro completo/CRC "));
+      Serial.println(lastMountHadBadCrc ? F("invalido") : F("ausente"));
+    }
     return false;
   }
   if (frame[3] != 0x09) {
@@ -294,6 +434,7 @@ void serviceMotion() {
     stopAll(F("timeout de seguranca"));
     return;
   }
+
   if (millis() - lastQueryAt < QUERY_INTERVAL_MS) return;
   if (!updatePositions() || motionMode != GOTO_POSITION) return;
 
@@ -314,6 +455,7 @@ void printHelp() {
   Serial.println(F(""));
   Serial.println(F("Comandos:"));
   Serial.println(F("  QUERY"));
+  Serial.println(F("  BNO"));
   Serial.println(F("  AZ POS [1-9]       | AZ NEG [1-9]"));
   Serial.println(F("  ALT POS [1-9]      | ALT NEG [1-9]"));
   Serial.println(F("  AZ GOTO <graus> [1-9]"));
@@ -351,6 +493,9 @@ void executeConsoleCommand() {
     stopAll(F("comando do usuario"));
   } else if (strcmp(first, "QUERY") == 0) {
     updatePositions();
+    printBnoOrientation();
+  } else if (strcmp(first, "BNO") == 0) {
+    printBnoOrientation();
   } else if (strcmp(first, "HELP") == 0) {
     printHelp();
   } else {
@@ -423,8 +568,16 @@ void pollConsole() {
 void setup() {
   Serial.begin(USB_BAUD);
   Serial1.begin(MOUNT_BAUD, SERIAL_8N1);
+  Wire.begin();
+  Wire.setClock(100000UL);
   motionMode = IDLE;
   delay(250);
+  bnoAvailable = beginBno();
+  if (bnoAvailable) {
+    Serial.println(F("BNO055 pronto no I2C 0x28 (registradores diretos)"));
+  } else {
+    Serial.println(F("AVISO: BNO055 nao encontrado no I2C 0x28"));
+  }
   Serial.println(F("Cosmic Cruiser AZ/ALT Controller pronto; motores PARADOS"));
   printHelp();
 }
@@ -432,4 +585,5 @@ void setup() {
 void loop() {
   pollConsole();
   serviceMotion();
+  serviceBno();
 }

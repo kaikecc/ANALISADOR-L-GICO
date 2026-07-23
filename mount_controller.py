@@ -21,6 +21,13 @@ POSITION_RE = re.compile(
     r"\s+ALT:\s*(\d+)\s*cnt\s*\|\s*([-+]?\d+(?:[.,]\d+)?)\s*graus",
     re.IGNORECASE,
 )
+BNO_RE = re.compile(
+    r"BNO:\s*heading\s*([-+]?\d+(?:[.,]\d+)?)\s*"
+    r"roll\s*([-+]?\d+(?:[.,]\d+)?)\s*"
+    r"pitch\s*([-+]?\d+(?:[.,]\d+)?)\s*"
+    r"CAL\s*sys\s*(\d)\s*gyro\s*(\d)\s*accel\s*(\d)\s*mag\s*(\d)",
+    re.IGNORECASE,
+)
 
 
 class MountControllerAPI:
@@ -37,6 +44,14 @@ class MountControllerAPI:
         self.connected_port = ""
         self.motion = {"az": "parado", "alt": "parado"}
         self.elevation_limits = {"enabled": True, "min": 35.0, "max": 85.0}
+        self.bno = {
+            "available": None, "heading": None, "roll": None, "pitch": None,
+            "cal_system": 0, "cal_gyro": 0, "cal_accel": 0, "cal_mag": 0,
+            "sample": 0,
+            "age_seconds": None,
+        }
+        self.bno_sample = 0
+        self.bno_updated_at: float | None = None
         self.sequence = 0
 
     def _event(self, text: str, level: str = "info") -> None:
@@ -172,6 +187,33 @@ class MountControllerAPI:
                     "alt": altitude,
                 }
             self._enforce_elevation_limits(altitude)
+        bno_match = BNO_RE.search(line)
+        if bno_match:
+            values = [
+                float(value.replace(",", ".")) for value in bno_match.groups()[:3]
+            ]
+            calibration = [int(value) for value in bno_match.groups()[3:]]
+            with self.state_lock:
+                self.bno_sample += 1
+                self.bno_updated_at = time.monotonic()
+                self.bno = {
+                    "available": True,
+                    "heading": values[0],
+                    "roll": values[1],
+                    "pitch": values[2],
+                    "cal_system": calibration[0],
+                    "cal_gyro": calibration[1],
+                    "cal_accel": calibration[2],
+                    "cal_mag": calibration[3],
+                    "sample": self.bno_sample,
+                    "age_seconds": 0.0,
+                }
+            # Telemetria chega cinco vezes por segundo; atualize os instrumentos
+            # sem inundar o console visual.
+            return
+        elif "BNO:" in line.upper() and "INDISPONIVEL" in line.upper():
+            with self.state_lock:
+                self.bno["available"] = False
         upper = line.upper()
         level = "error" if "ERRO" in upper or "AVISO" in upper else "ok" if (
             "PRONTO" in upper or "ALVO ATINGIDO" in upper
@@ -352,12 +394,18 @@ class MountControllerAPI:
         with self.state_lock:
             messages = [item for item in self.messages if item["id"] > int(after)]
             position = dict(self.position)
+            bno = dict(self.bno)
+            if self.bno_updated_at is not None:
+                bno["age_seconds"] = max(
+                    0.0, time.monotonic() - self.bno_updated_at
+                )
         return {
             "connected": bool(self.serial_port and self.serial_port.is_open),
             "port": self.connected_port,
             "position": position,
             "motion": dict(self.motion),
             "elevation_limits": dict(self.elevation_limits),
+            "bno": bno,
             "messages": messages,
             "sequence": self.sequence,
         }
@@ -368,14 +416,17 @@ class MountControllerAPI:
 
 def main() -> None:
     api = MountControllerAPI()
-    page = Path(__file__).with_name("mount_controller.html").resolve().as_uri()
+    html_path = Path(__file__).with_name("mount_controller.html").resolve()
+    # Evita que o WebKit reutilize uma versão antiga da interface após uma
+    # atualização do HTML/JavaScript.
+    page = f"{html_path.as_uri()}?v={html_path.stat().st_mtime_ns}"
     window = webview.create_window(
         "LogicLab — Controle Altazimutal",
         page,
         js_api=api,
         width=1280,
         height=820,
-        min_size=(940, 680),
+        min_size=(1180, 680),
         background_color="#0d1015",
     )
     window.events.closed += api.close

@@ -25,8 +25,8 @@
     #status.saving::before{content:"";display:inline-block;width:13px;height:13px;margin-right:9px;border:2px solid #a8c7fa55;border-top-color:var(--primary);border-radius:50%;vertical-align:-2px;animation:spin .8s linear infinite}
     @keyframes spin{to{transform:rotate(360deg)}}
     main{display:grid;grid-template-rows:minmax(330px,1fr) auto;gap:12px;padding:12px;min-height:0;overflow:hidden}
-    .scope-card{min-height:0;overflow:hidden;background:#000;border:1px solid var(--outline);border-radius:18px;box-shadow:0 2px 8px #0008}
-    canvas{display:block;width:100%;height:100%;min-height:330px;background:#000;cursor:grab;touch-action:none;user-select:none}
+    .scope-card{min-height:330px;overflow:hidden;background:#000;border:1px solid var(--outline);border-radius:18px;box-shadow:0 2px 8px #0008}
+    canvas{display:block;width:100%;height:100%;background:#000;cursor:grab;touch-action:none;user-select:none}
     canvas.dragging{cursor:grabbing}
     #decoderPanel{display:none;background:var(--surface);border:1px solid var(--outline);border-radius:18px;overflow:hidden;max-height:300px}
     .decoder-head{display:flex;align-items:center;gap:12px;padding:10px 14px;border-bottom:1px solid var(--outline)}.decoder-head strong{margin-right:auto}.decoder-body{overflow:auto;max-height:235px}

@@ -25,6 +25,23 @@ o motor durante a inicialização.
 | D19 / RX1 | TX da montagem, anteriormente observado como Fio A |
 | GND | GND da montagem |
 
+## Sensor BNO055 via I²C
+
+Não é necessário instalar nenhuma biblioteca externa. O firmware acessa
+diretamente os registradores do BNO055 via I²C e utiliza apenas `Wire`, incluída
+no núcleo padrão do Arduino. No Mega 2560, conecte:
+
+| BNO055 | Arduino Mega |
+|---|---|
+| VIN | 5 V somente em breakout compatível; caso contrário, 3,3 V |
+| GND | GND |
+| SDA | D20 / SDA |
+| SCL | D21 / SCL |
+
+O endereço utilizado é `0x28`. A interface recebe rumo, roll, pitch e os quatro
+níveis de calibração (`sistema/giroscópio/acelerômetro/magnetômetro`) cinco vezes
+por segundo. Um nível `3` indica calibração completa daquele componente.
+
 O USB permanece conectado ao computador para receber comandos a 115.200 baud.
 A comunicação com a montagem usa `Serial1` a 57.600 baud, 8N1.
 
