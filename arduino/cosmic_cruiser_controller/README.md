@@ -1,8 +1,8 @@
 # Controlador experimental da Cosmic Cruiser
 
-Este firmware transforma um Arduino Mega 2560 em controlador experimental do
-eixo azimutal da montagem Cosmic Cruiser GoTo. Ele utiliza os pacotes inferidos
-nas duas capturas de volta completa.
+Este firmware transforma um Arduino Mega 2560 em controlador experimental dos
+eixos de azimute e elevação da montagem Cosmic Cruiser GoTo. Ele utiliza os
+pacotes confirmados nas capturas de volta completa dos dois motores.
 
 ## Segurança elétrica e mecânica
 
@@ -34,39 +34,52 @@ Abra o Monitor Serial em 115.200 baud com final de linha habilitado:
 
 ```text
 QUERY
-POS
-NEG
-GOTO 180
+AZ POS 9
+AZ NEG 9
+ALT POS 9
+ALT NEG 9
+AZ GOTO 180 9
+ALT GOTO 45 9
+AZ STOP
+ALT STOP
 STOP
 HELP
 ```
 
-- `QUERY`: consulta e imprime posição em contagens e graus;
-- `POS`: movimento contínuo no sentido positivo;
-- `NEG`: movimento contínuo no sentido negativo;
-- `GOTO <graus>`: escolhe o caminho mais curto e para próximo do azimute;
-- `STOP`: parada imediata;
+- `QUERY`: consulta e imprime as duas posições;
+- `AZ POS/NEG [1-9]`: movimento azimutal contínuo;
+- `ALT POS/NEG [1-9]`: movimento de elevação contínuo;
+- `AZ GOTO <graus> [1-9]`: posicionamento absoluto do azimute;
+- `ALT GOTO <graus> [1-9]`: posicionamento absoluto da elevação;
+- `AZ STOP` ou `ALT STOP`: para somente o eixo indicado;
+- `STOP`: para imediatamente os dois eixos;
 - `!`: parada de emergência sem precisar enviar newline.
 
-O `GOTO` usa velocidade máxima, consulta a posição a cada 250 ms e trabalha com
-tolerância padrão de 0,75°. O resultado pode apresentar overshoot. Não use para
-operação real do telescópio antes de validar os comandos `QUERY`, `POS`, `NEG` e
-`STOP` separadamente.
+Se a velocidade for omitida, o firmware usa `9`. O `GOTO` consulta as duas
+posições a cada 250 ms e trabalha com tolerância padrão de 0,75°. O resultado
+pode apresentar overshoot.
+
+Somente o valor `9` foi confirmado como velocidade máxima. Os valores `1–8`
+estão disponíveis para investigação, mas são experimentais: ainda não foi
+confirmado se todos são aceitos nem se a ordem é linear.
 
 ## Pacotes implementados
 
 ```text
-Configurar:
-01 01 00 C0 00 00 00 00 00 00 00 00 CRC CRC
-
 Consultar posição:
 01 01 00 09 00 00 00 00 00 00 00 00 CRC CRC
 
-Mover:
+Mover azimute:
 01 01 00 80 01 DIREÇÃO VELOCIDADE 00 00 00 00 00 CRC CRC
 
-Parar:
+Parar azimute:
 01 01 00 80 00 00 00 00 00 00 00 00 CRC CRC
+
+Mover elevação:
+01 01 00 C0 01 DIREÇÃO VELOCIDADE 00 00 00 00 00 CRC CRC
+
+Parar elevação:
+01 01 00 C0 00 00 00 00 00 00 00 00 CRC CRC
 ```
 
 Valores atualmente confirmados:
@@ -77,7 +90,12 @@ Valores atualmente confirmados:
 | Direção negativa | `0x01` |
 | Velocidade máxima | `0x09` |
 | CRC | CRC-16/KERMIT, little-endian |
-| Escala azimutal | 1.673.280 contagens/volta |
+| Comando do azimute | `0x80` |
+| Comando da elevação | `0xC0` |
+| Posição do azimute na resposta | bytes 4–6, uint24 LE |
+| Posição da elevação na resposta | bytes 8–10, uint24 LE |
+| Escala dos dois eixos | 1.673.280 contagens/volta |
 | Contagens por grau | 4.648 |
 
-Outras velocidades ainda precisam ser capturadas antes de serem usadas.
+Antes de usar `GOTO`, valide `QUERY`, movimentos curtos em cada sentido e as
+paradas de cada eixo. Faça os primeiros testes sem telescópio ou carga.

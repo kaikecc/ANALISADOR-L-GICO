@@ -61,3 +61,16 @@ Leia primeiro as
 [instruções específicas do controlador](arduino/cosmic_cruiser_controller/README.md).
 Esse firmware dirige eletricamente a linha da montagem e exige desconectar o
 transmissor original e utilizar conversão de nível adequada.
+
+### Interface de controle
+
+Depois de gravar o firmware do controlador no Mega, abra
+`iniciar_montagem.command` ou execute:
+
+```bash
+.venv/bin/python mount_controller.py
+```
+
+A interface usa a USB a 115.200 baud e oferece posição em tempo real, movimentos
+manuais de azimute e altitude enquanto o botão estiver pressionado, `GOTO`,
+parada individual e parada de emergência dos dois eixos.

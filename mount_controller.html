@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>LogicLab — Controle Altazimutal</title>
+  <style>
+    :root{--bg:#0d1015;--panel:#171b22;--panel2:#202630;--line:#343c49;--text:#eef2f7;--muted:#9da9b8;--blue:#72aaff;--cyan:#5be0e6;--green:#75d69c;--red:#ff746d;--amber:#ffc665}
+    *{box-sizing:border-box}html,body{margin:0;min-width:900px;height:100%;background:radial-gradient(circle at 50% -30%,#233451 0,var(--bg) 45%);color:var(--text);font:14px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+    body{display:flex;flex-direction:column;overflow:hidden}button,select,input{font:inherit}
+    header{display:flex;align-items:center;gap:20px;padding:13px 20px;background:#12161dcc;border-bottom:1px solid var(--line);backdrop-filter:blur(18px)}
+    .brand{min-width:235px}.brand h1{margin:0;font-size:21px;letter-spacing:-.5px}.brand small{color:var(--muted)}
+    .connect{display:flex;align-items:end;gap:8px;flex:1}.field{display:grid;gap:5px;color:var(--muted);font-size:11px;letter-spacing:.4px}.field span{padding-left:4px}
+    select,input{height:40px;border:1px solid var(--line);border-radius:10px;background:#252b35;color:var(--text);padding:0 11px;outline:none}select:focus,input:focus{border-color:var(--blue)}
+    #port{width:330px}.btn{height:40px;border:1px solid var(--line);border-radius:20px;background:transparent;color:var(--blue);padding:0 16px;font-weight:700;cursor:pointer}.btn:hover{background:#72aaff18}.btn:disabled{opacity:.4;cursor:not-allowed}
+    .primary{background:var(--blue);color:#09244b;border:0}.connection-dot{width:9px;height:9px;border-radius:50%;background:#647080;box-shadow:0 0 0 5px #64708022}.connection-dot.on{background:var(--green);box-shadow:0 0 0 5px #75d69c22}
+    .emergency{height:48px;border:0;border-radius:12px;padding:0 22px;background:var(--red);color:#390300;font-weight:900;letter-spacing:.6px;box-shadow:0 5px 24px #ff746d33;cursor:pointer}.emergency:active{transform:translateY(1px)}
+    #status{padding:8px 22px;border-bottom:1px solid var(--line);background:#151a21;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.ok{color:var(--green)!important}.error{color:var(--red)!important}
+    main{display:grid;grid-template-columns:1fr 1fr;grid-template-rows:minmax(410px,1fr) 175px;gap:14px;padding:14px;min-height:0;flex:1}
+    .axis-card,.log-card{background:linear-gradient(145deg,#1b2029,#141820);border:1px solid var(--line);border-radius:18px;box-shadow:0 12px 40px #0004;overflow:hidden}
+    .axis-card{display:grid;grid-template-rows:auto 1fr auto;padding:18px}.axis-head{display:flex;align-items:center}.axis-head h2{margin:0;font-size:18px}.axis-head span{margin-left:auto;color:var(--muted);font-size:12px}
+    .instrument{display:grid;grid-template-columns:minmax(220px,1fr) minmax(190px,.8fr);align-items:center;gap:18px;min-height:0}
+    .dial{position:relative;width:min(30vh,270px);height:min(30vh,270px);min-width:210px;min-height:210px;margin:auto;border-radius:50%;background:repeating-conic-gradient(from -1deg,#637083 0 1deg,transparent 1deg 10deg),radial-gradient(circle,#1e2632 0 58%,#111720 59% 65%,#27303d 66% 71%,#111720 72%);box-shadow:inset 0 0 40px #0008,0 0 35px #5be0e610}
+    .dial::after{content:"";position:absolute;inset:18%;border:1px solid #475466;border-radius:50%}.needle{position:absolute;left:50%;top:50%;width:3px;height:38%;background:linear-gradient(var(--cyan),#5be0e633);transform-origin:50% 0;transform:rotate(180deg);border-radius:4px;box-shadow:0 0 12px var(--cyan);transition:transform .35s ease}
+    .hub{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:72px;height:72px;border-radius:50%;background:#111720;border:2px solid #526070;display:grid;place-items:center;z-index:2}.hub strong{font-size:16px}.cardinal{position:absolute;color:#b9c5d4;font-weight:800;font-size:11px}.north{top:8px;left:50%;transform:translateX(-50%)}.south{bottom:8px;left:50%;transform:translateX(-50%)}.west{left:9px;top:50%}.east{right:9px;top:50%}
+    .readout{display:grid;gap:12px}.angle{font:600 42px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:-2px}.counts{color:var(--muted);font:12px ui-monospace,monospace}.motion{display:inline-flex;align-items:center;gap:7px;color:var(--muted)}.motion::before{content:"";width:7px;height:7px;border-radius:50%;background:#687484}.motion.moving{color:var(--amber)}.motion.moving::before{background:var(--amber);box-shadow:0 0 9px var(--amber)}
+    .manual{display:grid;grid-template-columns:1fr auto 1fr;gap:8px;align-items:end}.hold{height:50px;border:1px solid var(--line);border-radius:12px;background:#252c37;color:var(--text);font-size:16px;font-weight:800;cursor:pointer;user-select:none}.hold:hover{border-color:var(--cyan);background:#273642}.hold:active,.hold.active{background:var(--cyan);color:#072e32}.speed{width:82px}
+    .goto{display:flex;gap:8px;margin-top:12px}.goto input{min-width:0;flex:1}.goto .btn{border-radius:10px}.stop-axis{color:var(--red)!important}
+    .limit-lock{display:flex;align-items:end;gap:8px;padding:10px 12px;border:1px solid #ffc66555;border-radius:12px;background:#ffc6650b}.limit-lock strong{color:var(--amber);font-size:12px;margin-right:auto}.limit-lock label.toggle{display:flex;align-items:center;gap:7px;color:var(--text);font-size:12px}.limit-lock input[type=checkbox]{width:18px;height:18px;accent-color:var(--amber)}.limit-lock input[type=number]{width:78px}
+    .log-card{grid-column:1/3;display:grid;grid-template-columns:270px 1fr}.safety{padding:16px 18px;border-right:1px solid var(--line)}.safety strong{display:block;color:var(--amber);margin-bottom:7px}.safety p{margin:0;color:var(--muted);font-size:12px;line-height:1.45}
+    #log{margin:0;padding:13px 18px;overflow:auto;list-style:none;font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace}#log li{color:#aeb8c5}#log time{color:#697787;margin-right:10px}#log .error{color:var(--red)}#log .ok{color:var(--green)}
+    @media(max-height:760px){main{grid-template-rows:minmax(360px,1fr) 135px}.axis-card{padding:13px}.dial{width:220px;height:220px}.angle{font-size:34px}.log-card{grid-template-columns:230px 1fr}}
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand"><h1>LogicLab Mount</h1><small>Controle altazimutal • Cosmic Cruiser</small></div>
+    <div class="connection-dot" id="dot"></div>
+    <div class="connect"><label class="field"><span>ARDUINO / USB</span><select id="port"><option value="">Selecione a porta</option></select></label><button class="btn" id="refresh">↻</button><button class="btn primary" id="connect">Conectar</button><button class="btn" id="query">Atualizar posição</button></div>
+    <button class="emergency" id="emergency">■ PARADA DE EMERGÊNCIA</button>
+  </header>
+  <div id="status">Inicializando interface…</div>
+  <main>
+    <section class="axis-card" data-axis="AZ">
+      <div class="axis-head"><h2>Azimute</h2><span>rotação horizontal • 0–360°</span></div>
+      <div class="instrument">
+        <div class="dial"><span class="cardinal north">N</span><span class="cardinal east">L</span><span class="cardinal south">S</span><span class="cardinal west">O</span><div class="needle" id="azNeedle"></div><div class="hub"><strong>AZ</strong></div></div>
+        <div class="readout"><div class="angle" id="azAngle">---.---°</div><div class="counts" id="azCounts">posição indisponível</div><div class="motion" id="azMotion">parado</div><div class="goto"><input id="azTarget" type="number" min="0" max="359.999" step="0.1" placeholder="Alvo em graus"><button class="btn primary goto-btn">Ir para</button><button class="btn stop-axis">Parar</button></div></div>
+      </div>
+      <div class="manual"><button class="hold" data-direction="NEG">◀ Negativo</button><label class="field speed"><span>VELOCIDADE</span><select class="speed-select"><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option>8</option><option selected>9</option></select></label><button class="hold" data-direction="POS">Positivo ▶</button></div>
+    </section>
+    <section class="axis-card" data-axis="ALT">
+      <div class="axis-head"><h2>Altitude / Elevação</h2><span>inclinação vertical • 0–360°</span></div>
+      <div class="instrument">
+        <div class="dial"><span class="cardinal north">ZÊNITE</span><span class="cardinal east">90°</span><span class="cardinal south">0°</span><div class="needle" id="altNeedle"></div><div class="hub"><strong>ALT</strong></div></div>
+        <div class="readout"><div class="angle" id="altAngle">---.---°</div><div class="counts" id="altCounts">posição indisponível</div><div class="motion" id="altMotion">parado</div><div class="limit-lock"><strong>TRAVA DE ELEVAÇÃO</strong><label class="toggle"><input id="limitEnabled" type="checkbox" checked> Ativa</label><label class="field"><span>MÍN.</span><input id="limitMin" type="number" min="0" max="359.9" step="0.1" value="35"></label><label class="field"><span>MÁX.</span><input id="limitMax" type="number" min="0.1" max="359.9" step="0.1" value="85"></label><button class="btn" id="applyLimits">Aplicar</button></div><div class="goto"><input id="altTarget" type="number" min="0" max="359.999" step="0.1" placeholder="Alvo em graus"><button class="btn primary goto-btn">Ir para</button><button class="btn stop-axis">Parar</button></div></div>
+      </div>
+      <div class="manual"><button class="hold" data-direction="NEG">▼ Negativo</button><label class="field speed"><span>VELOCIDADE</span><select class="speed-select"><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option>8</option><option selected>9</option></select></label><button class="hold" data-direction="POS">Positivo ▲</button></div>
+    </section>
+    <section class="log-card"><div class="safety"><strong>⚠ Teste sem carga primeiro</strong><p>Use conversão de nível no TX1, desconecte o transmissor original e mantenha acesso à alimentação. Os botões manuais só movimentam enquanto pressionados.</p></div><ul id="log"><li>Aguardando Arduino…</li></ul></section>
+  </main>
+  <script>
+    const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
+    const status=$('#status'), port=$('#port'), connect=$('#connect'), log=$('#log');
+    let connected=false,lastSequence=0,busy=false,held=null;
+    function show(message,type=''){status.textContent=message;status.className=type}
+    async function call(method,args=[]){try{return await window.pywebview.api[method](...args)}catch(error){show(error.message||String(error),'error');return{ok:false,message:error.message||String(error)}}}
+    async function refreshPorts(){
+      const old=port.value,ports=await call('ports');
+      port.innerHTML='<option value="">Selecione a porta</option>'+ports.map(p=>`<option value="${p.device}">${p.description} — ${p.device}</option>`).join('');
+      if(ports.some(p=>p.device===old))port.value=old;else{const preferred=ports.find(p=>/arduino|usbmodem|usbserial/i.test(p.device+' '+p.description));if(preferred)port.value=preferred.device}
+      show(ports.length?`${ports.length} porta(s) USB encontrada(s).`:'Arduino não encontrado. Reconecte o cabo USB e clique em ↻.',ports.length?'':'error');
+    }
+    $('#refresh').onclick=refreshPorts;
+    connect.onclick=async()=>{
+      if(busy)return;if(!connected&&!port.value){show('Arduino não encontrado. Reconecte o USB e clique em ↻.','error');return}
+      busy=true;connect.disabled=true;
+      const result=connected?await call('disconnect'):await call('connect',[port.value,115200]);
+      if(result.ok)connected=!connected;show(result.message,result.ok?'ok':'error');connect.disabled=false;busy=false;renderConnection();
+    };
+    function renderConnection(){
+      $('#dot').classList.toggle('on',connected);connect.textContent=connected?'Desconectar':'Conectar';port.disabled=connected;
+      $$('#query,.hold,.goto-btn,.stop-axis').forEach(el=>el.disabled=!connected);
+    }
+    $('#query').onclick=async()=>{const r=await call('query');show(r.message,r.ok?'ok':'error')};
+    $('#emergency').onclick=async()=>{const r=await call('emergency_stop');show(r.message,r.ok?'error':'error');$$('.hold').forEach(b=>b.classList.remove('active'));held=null};
+    $('#applyLimits').onclick=async()=>{
+      const enabled=$('#limitEnabled').checked,minimum=Number($('#limitMin').value),maximum=Number($('#limitMax').value);
+      const r=await call('set_elevation_limits',[enabled,minimum,maximum]);show(r.message,r.ok?'ok':'error');
+    };
+    $$('.axis-card').forEach(card=>{
+      const axis=card.dataset.axis,speed=card.querySelector('.speed-select');
+      card.querySelectorAll('.hold').forEach(button=>{
+        const start=async event=>{event.preventDefault();if(!connected||held)return;held={axis,button};button.classList.add('active');const r=await call('move',[axis,button.dataset.direction,Number(speed.value)]);show(r.message,r.ok?'ok':'error')};
+        button.addEventListener('mousedown',start);button.addEventListener('touchstart',start,{passive:false});
+      });
+      card.querySelector('.stop-axis').onclick=async()=>{const r=await call('stop_axis',[axis]);show(r.message,r.ok?'ok':'error')};
+      card.querySelector('.goto-btn').onclick=async()=>{
+        const input=card.querySelector('input'),value=Number(input.value);
+        if(input.value===''||value<0||value>=360){show('Informe um alvo entre 0° e 359,999°.','error');return}
+        const r=await call('goto',[axis,value,Number(speed.value)]);show(r.message,r.ok?'ok':'error');
+      };
+    });
+    async function releaseHeld(){if(!held)return;const current=held;held=null;current.button.classList.remove('active');const r=await call('stop_axis',[current.axis]);show(r.message,r.ok?'ok':'error')}
+    addEventListener('mouseup',releaseHeld);addEventListener('touchend',releaseHeld);addEventListener('blur',releaseHeld);
+    function updateAxis(name,value,counts,motion){
+      const valid=Number.isFinite(value);$(`#${name}Angle`).textContent=valid?`${value.toFixed(3)}°`:'---.---°';
+      $(`#${name}Counts`).textContent=Number.isFinite(counts)?`${counts.toLocaleString('pt-BR')} contagens`:'posição indisponível';
+      if(valid)$(`#${name}Needle`).style.transform=`rotate(${value+180}deg)`;
+      const m=$(`#${name}Motion`);m.textContent=motion;m.classList.toggle('moving',motion!=='parado');
+    }
+    function appendMessages(messages){
+      if(!messages.length)return;if(log.children.length===1&&log.textContent.includes('Aguardando'))log.innerHTML='';
+      messages.forEach(item=>{const li=document.createElement('li');li.className=item.level;const time=document.createElement('time');time.textContent=item.time;li.append(time,document.createTextNode(item.text));log.appendChild(li)});
+      while(log.children.length>80)log.firstChild.remove();log.scrollTop=log.scrollHeight;
+    }
+    async function poll(){
+      const state=await call('poll',[lastSequence]);
+      if(!state || !state.position || !state.motion){setTimeout(poll,700);return}
+      connected=state.connected;lastSequence=state.sequence;renderConnection();
+      if(state.elevation_limits){
+        $('#limitEnabled').checked=state.elevation_limits.enabled;
+        if(document.activeElement!==$('#limitMin'))$('#limitMin').value=state.elevation_limits.min;
+        if(document.activeElement!==$('#limitMax'))$('#limitMax').value=state.elevation_limits.max;
+      }
+      updateAxis('az',state.position.az,state.position.az_counts,state.motion.az);updateAxis('alt',state.position.alt,state.position.alt_counts,state.motion.alt);appendMessages(state.messages);
+      setTimeout(poll,250);
+    }
+    addEventListener('pywebviewready',async()=>{await refreshPorts();renderConnection();poll()});
+    setTimeout(()=>{if(!window.pywebview)show('Abra esta interface executando mount_controller.py.','error')},1200);
+  </script>
+</body>
+</html>
