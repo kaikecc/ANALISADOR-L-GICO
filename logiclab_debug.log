@@ -1,0 +1,12 @@
+2026-07-22T12:55:52 | Aplicativo iniciado | Python=3.9.6 | Tk=8.5
+2026-07-22T13:07:18 | Aplicativo iniciado | Python=3.9.6 | Tk=8.5
+2026-07-22T13:07:22 | LogicLab 2026.07.22-r3 | Python 3.9.6 | Tk 8.5 | Renderizador: ClassicWaveView | Widget visível: True | Painel: 1017×495 px | Amostras: 0 | Tempo inicial/final: —/— µs | Transições A/B: 0/0 | Versão do modelo: 0 | Versão desenhada: 0 | Log: /Users/kaikecarvalho/Documents/ANALISADOR LÓGICO/logiclab_debug.log
+2026-07-22T13:07:27 | LogicLab 2026.07.22-r3 | Python 3.9.6 | Tk 8.5 | Renderizador: ClassicWaveView | Widget visível: True | Painel: 1017×495 px | Amostras: 0 | Tempo inicial/final: —/— µs | Transições A/B: 0/0 | Versão do modelo: 0 | Versão desenhada: 0 | Log: /Users/kaikecarvalho/Documents/ANALISADOR LÓGICO/logiclab_debug.log
+2026-07-22T13:07:45 | ARQUIVO VALIDADO |  | Arquivo: /Users/kaikecarvalho/Documents/Untitled.csv | Amostras carregadas: 960 | Amostras antigas ignoradas: 0 | Intervalo: 0 a 135212 µs | Duração: 135.21 ms | Transições A/B: 0/959 | Painel: 1017×495 px | Renderizador: ClassicWaveView | Python/Tk: 3.9.6 / 8.5 | Build: 2026.07.22-r3 |  | A rotina de desenho foi executada. Consulte logiclab_debug.log se o painel continuar sem traços.
+2026-07-22T13:07:45 | Visualizador web aberto: /Users/kaikecarvalho/Documents/ANALISADOR LÓGICO/logiclab_graph.html
+2026-07-22T13:33:34 | Aplicativo iniciado | Python=3.9.6 | Tk=8.5
+2026-07-22T13:33:40 | ARQUIVO VALIDADO |  | Arquivo: /Users/kaikecarvalho/Documents/Untitled.csv | Amostras carregadas: 960 | Amostras antigas ignoradas: 0 | Intervalo: 0 a 135212 µs | Duração: 135.21 ms | Transições A/B: 0/959 | Painel: 1017×495 px | Renderizador: ClassicWaveView | Python/Tk: 3.9.6 / 8.5 | Build: 2026.07.22-r3 |  | A rotina de desenho foi executada. Consulte logiclab_debug.log se o painel continuar sem traços.
+2026-07-22T13:33:40 | Visualizador web aberto: /Users/kaikecarvalho/Documents/ANALISADOR LÓGICO/logiclab_graph.html
+2026-07-22T13:39:39 | Aplicativo iniciado | Python=3.9.6 | Tk=8.5
+2026-07-22T13:39:44 | ARQUIVO VALIDADO |  | Arquivo: /Users/kaikecarvalho/Documents/Untitled.csv | Amostras carregadas: 960 | Amostras antigas ignoradas: 0 | Intervalo: 0 a 135212 µs | Duração: 135.21 ms | Transições A/B: 0/959 | Painel: 1017×495 px | Renderizador: ClassicWaveView | Python/Tk: 3.9.6 / 8.5 | Build: 2026.07.22-r3 |  | A rotina de desenho foi executada. Consulte logiclab_debug.log se o painel continuar sem traços.
+2026-07-22T13:39:44 | Visualizador web aberto: /Users/kaikecarvalho/Documents/ANALISADOR LÓGICO/logiclab_graph.html

@@ -1,0 +1,332 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>LogicLab — Visualizador CSV</title>
+  <style>
+    :root{--bg:#111318;--surface:#1b1b1f;--surface2:#232429;--outline:#45464f;--text:#e4e2e6;--muted:#c5c6d0;--primary:#a8c7fa;--onprimary:#0b305f;--green:#81c995;--error:#ffb4ab;--cyan:#4dd9eb;--magenta:#ff70e6}
+    * { box-sizing: border-box; }
+    html,body{margin:0;min-width:720px;height:100%;background:var(--bg);color:var(--text);font:14px -apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif}
+    body{display:flex;flex-direction:column;overflow:hidden}
+    header{display:flex;align-items:center;gap:18px;padding:12px 18px;background:var(--surface);border-bottom:1px solid var(--outline);box-shadow:0 2px 8px #0007;z-index:2}
+    .brand{flex:0 0 170px}.brand h1{margin:0;font-size:21px;letter-spacing:-.4px}.brand small{color:var(--muted)}
+    .toolbar{display:flex;align-items:end;gap:8px;flex:1;flex-wrap:wrap}
+    .group{display:flex;align-items:end;gap:7px;padding:7px;background:var(--surface2);border-radius:16px}
+    .field{display:grid;gap:4px;color:var(--muted);font-size:11px}.field span{padding-left:4px}
+    label.file{padding:10px 16px;border-radius:20px;background:var(--primary);color:var(--onprimary);font-weight:700;cursor:pointer;white-space:nowrap}
+    input[type=file] { display: none; }
+    select{height:38px;max-width:270px;background:#303136;color:var(--text);border:1px solid var(--outline);border-radius:10px;padding:0 10px;outline:none}
+    button{height:38px;background:transparent;color:var(--primary);border:1px solid var(--outline);border-radius:20px;padding:0 14px;font-weight:700;cursor:pointer;white-space:nowrap}
+    button:hover{background:#a8c7fa18}button:disabled{opacity:.45;cursor:wait}.primary{background:var(--primary);color:var(--onprimary);border:0}
+    #position{width:min(240px,18vw);accent-color:var(--primary)}
+    #status{padding:10px 20px;background:#1e2026;border-bottom:1px solid var(--outline);white-space:pre-wrap;color:var(--muted)}
+    #status.ok{color:var(--green)}#status.error{color:var(--error)}
+    main{display:grid;grid-template-rows:minmax(330px,1fr) auto;gap:12px;padding:12px;min-height:0;overflow:hidden}
+    .scope-card{min-height:0;overflow:hidden;background:#000;border:1px solid var(--outline);border-radius:18px;box-shadow:0 2px 8px #0008}
+    canvas{display:block;width:100%;height:100%;min-height:330px;background:#000}
+    #decoderPanel{display:none;background:var(--surface);border:1px solid var(--outline);border-radius:18px;overflow:hidden;max-height:300px}
+    .decoder-head{display:flex;align-items:center;gap:12px;padding:10px 14px;border-bottom:1px solid var(--outline)}.decoder-head strong{margin-right:auto}.decoder-body{overflow:auto;max-height:235px}
+    table{width:100%;border-collapse:collapse;font:12px Menlo,monospace}th{position:sticky;top:0;background:#292a30;color:var(--muted);text-align:left;padding:9px}td{padding:8px 9px;border-top:1px solid #34353b;vertical-align:top}td.code{word-break:break-all;color:#d7e3ff}.hint{color:var(--muted);font-size:12px}
+    .a{color:var(--cyan)}.b{color:var(--magenta)}
+    @media(max-width:1100px){header{align-items:flex-start}.brand{flex-basis:125px}.brand h1{font-size:18px}.toolbar{gap:6px}.group{padding:5px}button{padding:0 11px}#position{width:150px}}
+    @media(max-height:720px){header{padding:8px 12px}main{grid-template-rows:minmax(260px,1fr) auto;padding:8px}.decoder-body{max-height:180px}#decoderPanel{max-height:235px}}
+  </style>
+</head>
+<body>
+  <header><div class="brand"><h1>LogicLab</h1><small>Analisador lógico</small></div><div class="toolbar">
+    <div class="group"><label class="field"><span>PORTA SERIAL</span><select id="port"><option value="">Porta serial</option></select></label><button id="refresh" title="Atualizar portas">↻</button><button id="connect">Conectar</button><button id="capture" class="primary">Capturar</button></div>
+    <div class="group"><label class="file">Importar CSV<input id="file" type="file" accept=".csv,text/csv"></label><button id="exportReplay">Exportar replay</button><button id="analyze">Repetição</button><button id="decode">HEX / DEC</button></div>
+    <div class="group"><label class="field"><span>JANELA</span><select id="window"><option value="40">40 transições</option><option value="80" selected>80 transições</option><option value="160">160 transições</option><option value="320">320 transições</option><option value="0">Captura inteira</option></select></label><button id="zoomOut">−</button><button id="zoomIn">+</button><label class="field"><span>POSIÇÃO</span><input id="position" type="range" min="0" max="0" value="0"></label></div>
+    <div class="group"><span class="a">● Fio A</span><span class="b">● Fio B</span></div>
+  </div></header>
+  <div id="status">Aguardando arquivo. Clique em “Selecionar CSV”.</div>
+  <main><section class="scope-card"><canvas id="scope"></canvas></section>
+  <section id="decoderPanel"><div class="decoder-head"><strong>Decodificador de quadros</strong><span class="hint" id="decoderMeta"></span><label class="field"><span>ALINHAMENTO</span><select id="decodeOffset"><option value="0">offset 0</option><option value="1">offset 1</option><option value="2">offset 2</option><option value="3">offset 3</option><option value="4">offset 4</option><option value="5">offset 5</option><option value="6">offset 6</option><option value="7">offset 7</option></select></label><label class="field"><span>ORDEM</span><select id="decodeOrder"><option value="msb">MSB primeiro</option><option value="lsb">LSB primeiro</option></select></label><button id="closeDecoder">✕</button></div><div class="decoder-body"><table><thead><tr><th>#</th><th>Padrão</th><th>Tempo</th><th>Bits</th><th>HEX</th><th>DECIMAL</th><th>ASCII</th></tr></thead><tbody id="decodeRows"></tbody></table></div></section>
+  </main>
+  <script>
+    const input = document.getElementById('file');
+    const status = document.getElementById('status');
+    const canvas = document.getElementById('scope');
+    const windowSelect = document.getElementById('window');
+    const position = document.getElementById('position');
+    const zoomIn = document.getElementById('zoomIn');
+    const zoomOut = document.getElementById('zoomOut');
+    const port = document.getElementById('port');
+    const connect = document.getElementById('connect');
+    const capture = document.getElementById('capture');
+    const refresh = document.getElementById('refresh');
+    const analyze = document.getElementById('analyze');
+    const decode = document.getElementById('decode');
+    const exportReplay = document.getElementById('exportReplay');
+    const decoderPanel = document.getElementById('decoderPanel');
+    const decoderMeta = document.getElementById('decoderMeta');
+    const decodeOffset = document.getElementById('decodeOffset');
+    const decodeOrder = document.getElementById('decodeOrder');
+    const decodeRows = document.getElementById('decodeRows');
+    const closeDecoder = document.getElementById('closeDecoder');
+    let samples = [];
+    let visibleCount = 80;
+    let modelVersion = -1;
+    let nativeReady = false;
+    let pollBusy = false;
+    let analysisBusy = false;
+    let controlBusy = false;
+    let connectedState = false;
+    let capturingState = false;
+    let decodedResult = null;
+
+    function apiCall(method, args=[], timeout=6000) {
+      const call = window.pywebview.api[method](...args);
+      const limit = new Promise((_, reject) => setTimeout(() => reject(new Error(`Tempo esgotado em ${method}`)), timeout));
+      return Promise.race([call, limit]);
+    }
+    async function threadCall(method, args=[], timeout=15000) {
+      const jobId = await apiCall('submit',[method,args],2500);
+      const started = Date.now();
+      while (Date.now() - started < timeout) {
+        await new Promise(resolve => setTimeout(resolve,80));
+        const state = await apiCall('job_status',[jobId],2500);
+        if (!state.done) continue;
+        if (state.error) throw new Error(state.error);
+        return state.result;
+      }
+      throw new Error(`Tempo esgotado em ${method}`);
+    }
+    function setButtonBusy(button, busy, busyText='Aguarde…') {
+      if (busy) { button.dataset.label = button.textContent; button.textContent = busyText; button.disabled = true; }
+      else { button.disabled = false; if (button.dataset.label) { button.textContent = button.dataset.label; delete button.dataset.label; } }
+    }
+
+    function escapeHtml(value) {
+      return String(value).replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+    }
+    function renderDecoder() {
+      if (!decodedResult) return;
+      const offset = Number(decodeOffset.value), order = decodeOrder.value;
+      decoderMeta.textContent = `${decodedResult.frames.length} quadros • ${decodedResult.unique_patterns || '?'} padrões • unidade ${decodedResult.unit_us.toFixed(2)} µs • hipótese ${order.toUpperCase()}, offset ${offset}`;
+      decodeRows.innerHTML = decodedResult.frames.slice(0,64).map(frame => {
+        const candidate = frame.alignments.find(item => item.offset === offset);
+        if (!candidate) return '';
+        const hex = candidate[`hex_${order}`], dec = candidate[`dec_${order}`], ascii = candidate[`ascii_${order}`];
+        return `<tr><td>${frame.number}</td><td><strong>${frame.pattern}</strong> <span class="hint">(×${frame.repeat_count})</span></td><td>${(frame.start_us/1000).toFixed(3)} ms</td><td>${frame.bits.length}</td><td class="code">${escapeHtml(hex)}</td><td class="code">${escapeHtml(dec)}</td><td class="code">${escapeHtml(ascii)}</td></tr>`;
+      }).join('');
+      decoderPanel.style.display='block';
+      requestAnimationFrame(draw);
+    }
+    decodeOffset.addEventListener('change', renderDecoder);
+    decodeOrder.addEventListener('change', renderDecoder);
+    closeDecoder.addEventListener('click', () => { decoderPanel.style.display='none'; requestAnimationFrame(draw); });
+
+    function requirePython() {
+      if (nativeReady) return true;
+      status.className = 'error';
+      status.textContent = 'SEM ACESSO SERIAL: este HTML foi aberto diretamente. Feche esta janela e execute iniciar.command para abrir o aplicativo Python.';
+      return false;
+    }
+
+    async function refreshPorts() {
+      if (!requirePython()) return;
+      try {
+        setButtonBusy(refresh, true, '…');
+        const ports = await threadCall('ports');
+        port.innerHTML = '<option value="">Porta serial</option>' + ports.map(p => `<option value="${p.device}">${p.description} — ${p.device}</option>`).join('');
+        const preferred = ports.find(p => /arduino|usbmodem|usbserial/i.test(p.description + ' ' + p.device));
+        if (preferred) port.value = preferred.device;
+        status.className = ports.length ? 'ok' : 'error';
+        status.textContent = ports.length ? `${ports.length} porta(s) encontrada(s). Selecionada: ${port.value || 'nenhuma'}` : 'Nenhuma porta serial encontrada. Reconecte o USB e clique em Atualizar portas.';
+      } catch (error) {
+        status.className = 'error'; status.textContent = `ERRO AO LISTAR PORTAS: ${error.message || error}`;
+      } finally { setButtonBusy(refresh, false); }
+    }
+    window.addEventListener('pywebviewready', async () => {
+      nativeReady = true;
+      await refreshPorts();
+      if (!port.value) status.textContent = 'Aplicativo Python pronto. Selecione uma porta ou importe um CSV.';
+      setTimeout(pollPython, 250);
+    });
+    setTimeout(() => { if (!nativeReady) requirePython(); }, 1200);
+    refresh.addEventListener('click', refreshPorts);
+    connect.addEventListener('click', async () => {
+      if (!requirePython()) return;
+      if (controlBusy) return;
+      if (!connectedState && !port.value) { status.className='error'; status.textContent='Selecione uma porta serial.'; return; }
+      controlBusy=true; setButtonBusy(connect,true,connectedState?'Desconectando…':'Conectando…');
+      try {
+        const result = connectedState ? await threadCall('disconnect') : await threadCall('connect',[port.value,115200]);
+        status.className = result.ok ? 'ok' : 'error'; status.textContent = result.message;
+        if (result.ok) connectedState=!connectedState;
+      } catch (error) { status.className='error'; status.textContent=`ERRO DE CONEXÃO: ${error.message || error}`; }
+      finally { controlBusy=false; setButtonBusy(connect,false); connect.textContent=connectedState?'Desconectar':'Conectar'; }
+    });
+    capture.addEventListener('click', async () => {
+      if (!requirePython()) return;
+      if (controlBusy) return;
+      controlBusy=true; const starting=!capturingState; setButtonBusy(capture,true,starting?'Iniciando…':'Parando…');
+      try {
+        const result = starting ? await threadCall('capture',[true]) : await threadCall('stop_capture');
+        status.className = result.ok ? 'ok' : 'error'; status.textContent = result.message;
+        if (result.ok) capturingState=starting;
+      } catch(error) { status.className='error'; status.textContent=`ERRO NA CAPTURA: ${error.message || error}`; }
+      finally { controlBusy=false; setButtonBusy(capture,false); capture.textContent=capturingState?'Parar':'Capturar'; }
+    });
+    exportReplay.addEventListener('click', async () => {
+      if (!samples.length) { status.className='error'; status.textContent='Nenhuma amostra para exportar.'; return; }
+      if (!requirePython() || analysisBusy) return;
+      analysisBusy=true; setButtonBusy(exportReplay,true,'Exportando…');
+      try {
+        const result = await threadCall('export_replay',[samples.slice(-20000)],10000);
+        status.className=result.ok?'ok':'error'; status.textContent=result.message;
+      } catch(error) { status.className='error'; status.textContent=`ERRO AO EXPORTAR: ${error.message || error}`; }
+      finally { analysisBusy=false; setButtonBusy(exportReplay,false); }
+    });
+    async function pollPython() {
+      if (!nativeReady || pollBusy) return;
+      if (controlBusy || analysisBusy) { setTimeout(pollPython,300); return; }
+      pollBusy = true;
+      try {
+        const result = await apiCall('poll',[modelVersion],2500);
+        modelVersion = result.version;
+        connectedState=Boolean(result.connected); capturingState=Boolean(result.capturing);
+        connect.textContent = connectedState ? 'Desconectar' : 'Conectar';
+        capture.textContent = capturingState ? 'Parar' : 'Capturar';
+        if (result.samples && result.samples.length) {
+          samples = result.samples; visibleCount = Math.min(80, samples.length); updateScroll(true); draw();
+          status.className = 'ok'; status.textContent = `CAPTURA: ${samples.length.toLocaleString('pt-BR')} amostras` + (result.messages.length ? ` • ${result.messages[result.messages.length-1]}` : '');
+        }
+      } catch (error) {
+        status.className='error'; status.textContent=`ERRO DE COMUNICAÇÃO: ${error.message || error}`;
+      } finally {
+        pollBusy = false;
+        setTimeout(pollPython, 300);
+      }
+    }
+    analyze.addEventListener('click', async () => {
+      if (!samples.length) { status.className='error'; status.textContent='Nenhuma amostra para analisar.'; return; }
+      if (!nativeReady) return;
+      if (analysisBusy) return;
+      analysisBusy=true; setButtonBusy(analyze,true,'Analisando…'); status.className=''; status.textContent='Analisando repetição…';
+      try {
+        const results = await threadCall('analyze_samples',[samples.slice(-5000)],15000);
+        status.className = results.length ? 'ok' : 'error';
+        status.textContent = results.length ? results.map(r => `REPETIÇÃO FIO ${r.wire}: ${r.transitions} transições/ciclo • ${(r.period_us/1000).toFixed(3)} ms • ${r.frequency_hz.toFixed(2)} Hz • ${(r.similarity*100).toFixed(1)}% • jitter ${r.jitter_us.toFixed(2)} µs`).join('\n') : 'Nenhuma repetição confiável detectada.';
+      } catch(error) { status.className='error'; status.textContent=`ERRO NA ANÁLISE: ${error.message || error}`; }
+      finally { analysisBusy=false; setButtonBusy(analyze,false); }
+    });
+    decode.addEventListener('click', async () => {
+      if (!samples.length) { status.className='error'; status.textContent='Nenhuma amostra para decodificar.'; return; }
+      if (!requirePython()) return;
+      if (analysisBusy) return;
+      analysisBusy=true; setButtonBusy(decode,true,'Decodificando…'); status.className=''; status.textContent='Decodificando pulsos…';
+      try {
+        const result = await threadCall('decode_samples',[samples.slice(-5000),1],15000);
+        if (!result.frames.length) { status.className='error'; status.textContent='Nenhum quadro decodificável encontrado no fio B.'; return; }
+        decodedResult = result;
+        renderDecoder();
+        status.className='ok'; status.textContent=`${result.frames.length} quadro(s) convertido(s). Escolha o alinhamento e a ordem de bits no painel.`;
+      } catch (error) { status.className='error'; status.textContent=`ERRO NO DECODIFICADOR: ${error.message || error}`; }
+      finally { analysisBusy=false; setButtonBusy(decode,false); }
+    });
+
+    input.addEventListener('change', async () => {
+      const file = input.files[0];
+      if (!file) return;
+      try {
+        const text = await file.text();
+        const lines = text.replace(/^\uFEFF/, '').trim().split(/\r?\n/);
+        const header = lines.shift().split(',').map(v => v.trim());
+        const ti = header.indexOf('tempo_us'), ai = header.indexOf('fio_A_D2'), bi = header.indexOf('fio_B_D3');
+        if (ti < 0 || ai < 0 || bi < 0) throw new Error('Colunas obrigatórias: tempo_us, fio_A_D2, fio_B_D3');
+        let latest = [], discarded = 0;
+        for (let n = 0; n < lines.length; n++) {
+          if (!lines[n].trim()) continue;
+          const cells = lines[n].split(',');
+          const t = Number(cells[ti]), a = Number(cells[ai]), b = Number(cells[bi]);
+          if (!Number.isFinite(t) || ![0,1].includes(a) || ![0,1].includes(b)) throw new Error(`Valor inválido na linha ${n + 2}`);
+          if (latest.length && t < latest[latest.length - 1][0]) { discarded += latest.length; latest = []; }
+          latest.push([t, a, b]);
+        }
+        if (latest.length < 2) throw new Error('O arquivo precisa conter pelo menos duas amostras');
+        samples = latest;
+        visibleCount = Math.min(80, samples.length);
+        windowSelect.value = '80';
+        updateScroll(true);
+        let ea = 0, eb = 0;
+        for (let i = 1; i < samples.length; i++) { ea += samples[i][1] !== samples[i-1][1]; eb += samples[i][2] !== samples[i-1][2]; }
+        const duration = samples[samples.length - 1][0] - samples[0][0];
+        status.className = 'ok';
+        status.textContent = `VALIDADO: ${file.name} • ${samples.length.toLocaleString('pt-BR')} amostras • ${(duration/1000).toFixed(3)} ms • transições A/B: ${ea}/${eb}` + (discarded ? ` • ${discarded} antigas ignoradas` : '');
+        draw();
+      } catch (error) {
+        samples = [];
+        status.className = 'error';
+        status.textContent = `ERRO: ${error.message}`;
+        draw();
+      }
+    });
+
+    function updateScroll(goToEnd=false) {
+      const max = Math.max(0, samples.length - Math.min(visibleCount || samples.length, samples.length));
+      position.max = String(max);
+      if (goToEnd) position.value = String(max);
+      else position.value = String(Math.min(Number(position.value), max));
+    }
+    function setZoom(next) {
+      if (!samples.length) return;
+      const old = Math.min(visibleCount || samples.length, samples.length);
+      const center = Number(position.value) + old / 2;
+      visibleCount = Math.max(10, Math.min(samples.length, Math.round(next)));
+      windowSelect.value = ['40','80','160','320'].includes(String(visibleCount)) ? String(visibleCount) : '';
+      updateScroll();
+      position.value = String(Math.max(0, Math.min(Number(position.max), Math.round(center - visibleCount/2))));
+      draw();
+    }
+    windowSelect.addEventListener('change', () => {
+      visibleCount = Number(windowSelect.value) || samples.length;
+      updateScroll(); draw();
+    });
+    position.addEventListener('input', draw);
+    zoomIn.addEventListener('click', () => setZoom(visibleCount / 1.6));
+    zoomOut.addEventListener('click', () => setZoom(visibleCount * 1.6));
+    canvas.addEventListener('wheel', event => {
+      event.preventDefault();
+      if (event.shiftKey || Math.abs(event.deltaX) > Math.abs(event.deltaY)) {
+        const step = Math.max(1, Math.round(visibleCount / 10));
+        position.value = String(Math.max(0, Math.min(Number(position.max), Number(position.value) + Math.sign(event.deltaX || event.deltaY) * step)));
+        draw();
+      } else {
+        setZoom(event.deltaY < 0 ? visibleCount / 1.25 : visibleCount * 1.25);
+      }
+    }, {passive:false});
+    function draw() {
+      const rect = canvas.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+      const w = Math.max(500, rect.width), h = Math.max(420, rect.height);
+      canvas.width = w * dpr; canvas.height = h * dpr;
+      const ctx = canvas.getContext('2d'); ctx.scale(dpr, dpr);
+      ctx.fillStyle = '#000'; ctx.fillRect(0, 0, w, h);
+      const L = 76, R = 24, T = 24, B = 44, pw = w-L-R, ph = h-T-B;
+      const limit = Math.min(visibleCount || samples.length, samples.length);
+      const startIndex = Math.min(Number(position.value), Math.max(0, samples.length-limit));
+      const view = samples.slice(startIndex, startIndex + limit);
+      ctx.font = '12px Menlo, monospace'; ctx.fillStyle = '#fff'; ctx.strokeStyle = '#fff';
+      for (let i=0; i<=10; i++) {
+        const x=L+pw*i/10; ctx.globalAlpha=i===0?1:.28; ctx.beginPath(); ctx.moveTo(x,T); ctx.lineTo(x,T+ph); ctx.stroke(); ctx.globalAlpha=1;
+        if (view.length) { const t=view[0][0]+(view[view.length-1][0]-view[0][0])*i/10; ctx.fillText((t/1000).toFixed(1)+' ms',x-25,T+ph+25); }
+      }
+      for (let row=0; row<2; row++) {
+        const y0=T+row*ph/2, hi=y0+ph*.12, lo=y0+ph*.38;
+        ctx.globalAlpha=.45; ctx.strokeStyle='#fff'; [hi,lo].forEach(y=>{ctx.beginPath();ctx.moveTo(L,y);ctx.lineTo(L+pw,y);ctx.stroke()}); ctx.globalAlpha=1;
+        ctx.fillStyle='#fff'; ctx.fillText(row?'FIO B':'FIO A',16,y0+ph*.25); ctx.fillText('1',55,hi+4); ctx.fillText('0',55,lo+4);
+        if (!view.length) continue;
+        ctx.strokeStyle=row?'#ff3df2':'#00e5ff'; ctx.lineWidth=3; ctx.beginPath();
+        let prev=view[0][row+1], py=prev?hi:lo; ctx.moveTo(L,py);
+        const span=view[view.length-1][0]-view[0][0]||1;
+        for (let i=1;i<view.length;i++) { const x=L+(view[i][0]-view[0][0])/span*pw, next=view[i][row+1], ny=next?hi:lo; ctx.lineTo(x,py); if(next!==prev)ctx.lineTo(x,ny); prev=next; py=ny; }
+        ctx.lineTo(L+pw,py); ctx.stroke();
+      }
+      if (!samples.length) { ctx.fillStyle='#aaa'; ctx.font='18px -apple-system,Arial'; ctx.fillText('Selecione um CSV para desenhar o sinal',L+40,h/2); }
+    }
+    addEventListener('resize', draw); draw();
+  </script>
+</body>
+</html>
