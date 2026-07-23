@@ -124,8 +124,8 @@ Considerando a escala provável:
 
 | Ponto | Contagem | Ângulo aproximado |
 |---|---:|---:|
-| Primeira resposta válida | 672.423 | 142,07° |
-| Última resposta válida | 680.211 | 143,71° |
+| Primeira resposta válida | 672.423 | 144,67° |
+| Última resposta válida | 680.211 | 146,34° |
 
 Entre a primeira e a última resposta UART válida foram observados
 aproximadamente 99,54% de uma volta. A diferença residual de cerca de 1,68°

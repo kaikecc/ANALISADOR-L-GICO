@@ -49,3 +49,15 @@ O Mega possui apenas 8 kB de SRAM. A duração da captura agora é limitada prin
 - Velocidade: `1.000.000 baud`.
 - Amostra enviada durante a captura: `D,<tempo_desde_o_inicio_em_microssegundos>,<máscara_decimal>`.
 - Mensagem de estado: `#<texto>`.
+
+## Controlador experimental da montagem
+
+O firmware separado
+[`arduino/cosmic_cruiser_controller/cosmic_cruiser_controller.ino`](arduino/cosmic_cruiser_controller/cosmic_cruiser_controller.ino)
+implementa consulta de posição, movimento positivo/negativo, parada e `GOTO` em
+graus usando os pacotes inferidos nas capturas azimutais.
+
+Leia primeiro as
+[instruções específicas do controlador](arduino/cosmic_cruiser_controller/README.md).
+Esse firmware dirige eletricamente a linha da montagem e exige desconectar o
+transmissor original e utilizar conversão de nível adequada.

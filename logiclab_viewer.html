@@ -31,6 +31,7 @@
     #decoderPanel{display:none;background:var(--surface);border:1px solid var(--outline);border-radius:18px;overflow:hidden;max-height:300px}
     .decoder-head{display:flex;align-items:center;gap:12px;padding:10px 14px;border-bottom:1px solid var(--outline)}.decoder-head strong{margin-right:auto}.decoder-body{overflow:auto;max-height:235px}
     table{width:100%;border-collapse:collapse;font:12px Menlo,monospace}th{position:sticky;top:0;background:#292a30;color:var(--muted);text-align:left;padding:9px}td{padding:8px 9px;border-top:1px solid #34353b;vertical-align:top}td.code{word-break:break-all;color:#d7e3ff}.hint{color:var(--muted);font-size:12px}
+    .protocol{color:var(--primary);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif}.protocol strong{display:block;color:var(--text)}.crc-ok{color:var(--green)}.crc-bad{color:var(--error)}
     .live{display:inline-flex;align-items:center;gap:5px;margin-left:8px;color:var(--green);font-size:10px;font-weight:800;letter-spacing:.5px}.live::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 0 0 #81c99588;animation:pulse 1.6s infinite}@keyframes pulse{70%{box-shadow:0 0 0 7px #81c99500}}
     .a{color:var(--cyan)}.b{color:var(--magenta)}
     @media(max-width:1100px){header{align-items:flex-start}.brand{flex-basis:125px}.brand h1{font-size:18px}.toolbar{gap:6px}.group{padding:5px}button{padding:0 11px}#position{width:150px}}
@@ -46,7 +47,7 @@
   </div></header>
   <div id="status">Aguardando arquivo. Clique em “Selecionar CSV”.</div>
   <main><section class="scope-card"><canvas id="scope"></canvas></section>
-  <section id="decoderPanel"><div class="decoder-head"><strong>UART 57.600 baud • 8N1 <span class="live">AUTO</span></strong><span class="hint" id="decoderMeta"></span><label class="field"><span>CANAL</span><select id="decodeWire"><option value="ALL">Fios A + B</option><option value="A">Somente Fio A</option><option value="B">Somente Fio B</option></select></label><label class="field"><span>CAMPO 16-BIT</span><select id="decodeOffset"><option value="0">bytes 0–1</option><option value="1">bytes 1–2</option><option value="2">bytes 2–3</option><option value="3">bytes 3–4</option><option value="4">bytes 4–5</option><option value="5" selected>bytes 5–6</option><option value="6">bytes 6–7</option><option value="7">bytes 7–8</option><option value="8">bytes 8–9</option><option value="9">bytes 9–10</option><option value="10">bytes 10–11</option><option value="11">bytes 11–12</option><option value="12">bytes 12–13</option></select></label><label class="field"><span>INTERPRETAÇÃO</span><select id="decodeOrder"><option value="u16le">uint16 LE</option><option value="s16le">int16 LE</option><option value="u16be">uint16 BE</option></select></label><button id="closeDecoder">✕</button></div><div class="decoder-body"><table><thead><tr><th>#</th><th>Fio / padrão</th><th>Tempo</th><th>Bytes</th><th>HEX UART</th><th>Campo 16-bit</th><th>Checksum</th></tr></thead><tbody id="decodeRows"></tbody></table></div></section>
+  <section id="decoderPanel"><div class="decoder-head"><strong>Cosmic Cruiser • UART 57.600 8N1 <span class="live">AUTO</span></strong><span class="hint" id="decoderMeta"></span><label class="field"><span>CANAL</span><select id="decodeWire"><option value="ALL">Fios A + B</option><option value="A">Somente Fio A</option><option value="B">Somente Fio B</option></select></label><label class="field"><span>CAMPO MANUAL</span><select id="decodeOffset"><option value="0">bytes 0–1</option><option value="1">bytes 1–2</option><option value="2">bytes 2–3</option><option value="3">bytes 3–4</option><option value="4" selected>bytes 4–5</option><option value="5">bytes 5–6</option><option value="6">bytes 6–7</option><option value="7">bytes 7–8</option><option value="8">bytes 8–9</option><option value="9">bytes 9–10</option><option value="10">bytes 10–11</option><option value="11">bytes 11–12</option><option value="12">bytes 12–13</option></select></label><label class="field"><span>INTERPRETAÇÃO</span><select id="decodeOrder"><option value="u16le">uint16 LE</option><option value="s16le">int16 LE</option><option value="u16be">uint16 BE</option></select></label><button id="closeDecoder">✕</button></div><div class="decoder-body"><table><thead><tr><th>#</th><th>Fio / padrão</th><th>Tempo</th><th>Bytes</th><th>HEX UART</th><th>Interpretação Cosmic Cruiser</th><th>Campo manual</th><th>CRC</th></tr></thead><tbody id="decodeRows"></tbody></table></div></section>
   </main>
   <script>
     const input = document.getElementById('file');
@@ -121,18 +122,25 @@
             const header = lines.shift().split(',').map(v => v.trim());
             const ti = header.indexOf('tempo_us'), ai = header.indexOf('fio_A_D2'), bi = header.indexOf('fio_B_D3');
             if (ti < 0 || ai < 0 || bi < 0) throw new Error('Colunas obrigatórias: tempo_us, fio_A_D2, fio_B_D3');
-            let latest = [], discarded = 0, ea = 0, eb = 0;
+            let latest = [], discarded = 0, repaired = 0, ea = 0, eb = 0;
             for (let n = 0; n < lines.length; n++) {
               if (!lines[n].trim()) continue;
               const cells = lines[n].split(',');
-              const t = Number(cells[ti]), a = Number(cells[ai]), b = Number(cells[bi]);
+              let t = Number(cells[ti]); const a = Number(cells[ai]), b = Number(cells[bi]);
               if (!Number.isFinite(t) || ![0,1].includes(a) || ![0,1].includes(b)) throw new Error('Valor inválido na linha ' + (n + 2));
-              if (latest.length && t < latest[latest.length - 1][0]) { discarded += latest.length; latest = []; ea = 0; eb = 0; }
+              if (latest.length && t < latest[latest.length - 1][0]) {
+                const nextCells = n + 1 < lines.length ? lines[n + 1].split(',') : [];
+                const nextTime = Number(nextCells[ti]);
+                if (Number.isFinite(nextTime) && nextTime > latest[latest.length - 1][0]) {
+                  t = Math.round((latest[latest.length - 1][0] + nextTime) / 2);
+                  repaired++;
+                } else { discarded += latest.length; latest = []; ea = 0; eb = 0; }
+              }
               if (latest.length) { ea += a !== latest[latest.length - 1][1]; eb += b !== latest[latest.length - 1][2]; }
               latest.push([t, a, b]);
             }
             if (latest.length < 2) throw new Error('O arquivo precisa conter pelo menos duas amostras');
-            self.postMessage({ok:true, samples:latest, discarded, ea, eb});
+            self.postMessage({ok:true, samples:latest, discarded, repaired, ea, eb});
           } catch (error) { self.postMessage({ok:false, error:error.message || String(error)}); }
         };`;
       const url = URL.createObjectURL(new Blob([source], {type:'text/javascript'}));
@@ -162,11 +170,16 @@
       const totalBytes = channels.reduce((sum, channel) => sum + channel.bytes, 0);
       const errors = channels.reduce((sum, channel) => sum + channel.framing_errors, 0);
       const label = selectedWire === 'ALL' ? 'Fios A + B' : `Fio ${selectedWire}`;
-      decoderMeta.textContent = `${label} • ${events.length} quadros • ${totalBytes} bytes • ${decodedResult.baud} baud • 8N1 • ${errors} erros de framing`;
+      const cosmic = decodedResult.cosmic || {};
+      const speed = Number.isFinite(cosmic.median_speed_deg_s) ? ` • velocidade ${cosmic.median_speed_deg_s.toFixed(3)} °/s` : '';
+      decoderMeta.textContent = `${label} • ${events.length} quadros • ${totalBytes} bytes • ${errors} erros de framing • ${Number(cosmic.counts_per_turn || 1673280).toLocaleString('pt-BR')} cnt/volta${speed}`;
       decodeRows.innerHTML = events.slice(0,128).map(frame => {
         const field = frame.numeric.find(item => item.offset === offset);
-        const checksumNames = Object.entries(frame.checksum).filter(([,valid]) => valid).map(([name]) => name).join(', ') || 'não identificado';
-        return `<tr><td>${frame.number}</td><td><strong class="${frame.wire==='A'?'a':'b'}">Fio ${frame.wire}</strong> / ${frame.pattern} <span class="hint">(×${frame.repeat_count})</span></td><td>${(frame.start_us/1000).toFixed(3)} ms</td><td>${frame.values.length}</td><td class="code">${escapeHtml(frame.hex)}</td><td class="code">${field ? `${interpretation} = ${field[interpretation]}` : '—'}</td><td class="code">${checksumNames}</td></tr>`;
+        const info = frame.cosmic || {label:'Quadro não identificado',confidence:'baixa',crc_ok:false};
+        const positionText = Number.isFinite(info.position_count) ? `<br>Posição: ${info.position_count.toLocaleString('pt-BR')} cnt = <strong>${info.position_degrees.toFixed(4)}°</strong>` : '';
+        const speedText = Number.isFinite(info.speed_deg_s) ? `<br>Velocidade: ${info.speed_deg_s.toFixed(3)} °/s` : '';
+        const crc = info.crc_ok ? '<span class="crc-ok">✓ CRC-16/KERMIT</span>' : '<span class="crc-bad">✕ CRC inválido</span>';
+        return `<tr><td>${frame.number}</td><td><strong class="${frame.wire==='A'?'a':'b'}">Fio ${frame.wire}</strong> / ${frame.pattern} <span class="hint">(×${frame.repeat_count})</span></td><td>${(frame.start_us/1000).toFixed(3)} ms</td><td>${frame.values.length}</td><td class="code">${escapeHtml(frame.hex)}</td><td class="protocol"><strong>${escapeHtml(info.label)}</strong><span class="hint">confiança ${escapeHtml(info.confidence)}</span>${positionText}${speedText}</td><td class="code">${field ? `${interpretation} = ${field[interpretation]}` : '—'}</td><td>${crc}</td></tr>`;
       }).join('');
       decoderPanel.style.display='block';
       requestAnimationFrame(draw);
@@ -324,7 +337,9 @@
           status.className='ok';
           status.textContent=`CAPTURA CONCLUÍDA • ${Number(result.stored_samples || samples.length).toLocaleString('pt-BR')} amostras • CSV completo salvo em: ${result.saved_path}`;
         } else if (result.samples && result.samples.length) {
-          status.className = 'ok'; status.textContent = `CAPTURA: ${Number(result.stored_samples || samples.length).toLocaleString('pt-BR')} amostras no Python • exibindo as ${samples.length.toLocaleString('pt-BR')} mais recentes` + (result.messages.length ? ` • ${result.messages[result.messages.length-1]}` : '');
+          const malformed = Number(result.malformed_samples || 0);
+          status.className = malformed ? 'error' : 'ok';
+          status.textContent = `CAPTURA: ${Number(result.stored_samples || samples.length).toLocaleString('pt-BR')} amostras no Python • exibindo as ${samples.length.toLocaleString('pt-BR')} mais recentes` + (malformed ? ` • ${malformed} timestamp(s) inválido(s) descartado(s)` : '') + (result.messages.length ? ` • ${result.messages[result.messages.length-1]}` : '');
         }
       } catch (error) {
         status.className='error'; status.textContent=`ERRO DE COMUNICAÇÃO: ${error.message || error}`;
@@ -358,7 +373,9 @@
         renderDecoder();
         scheduleAutomaticDecode(900);
         const bytesA=result.channels[0].bytes, bytesB=result.channels[1].bytes;
-        status.className='ok'; status.textContent=`UART 57.600 8N1: ${result.events.length} quadro(s), Fio A=${bytesA} bytes, Fio B=${bytesB} bytes. Compare campos durante movimentos controlados.`;
+        const protocol=result.cosmic || {};
+        const protocolSpeed=Number.isFinite(protocol.median_speed_deg_s) ? ` • velocidade ${protocol.median_speed_deg_s.toFixed(3)} °/s` : '';
+        status.className='ok'; status.textContent=`COSMIC CRUISER: ${result.events.length} quadro(s) UART • Fio A=${bytesA} bytes • Fio B=${bytesB} bytes • ${protocol.position_frames || 0} resposta(s) de posição${protocolSpeed}`;
       } catch (error) { status.className='error'; status.textContent=`ERRO NO DECODIFICADOR: ${error.message || error}`; }
       finally { analysisBusy=false; setButtonBusy(decode,false); }
     });
@@ -375,7 +392,7 @@
         updateScroll(true);
         const duration = samples[samples.length - 1][0] - samples[0][0];
         status.className = 'ok';
-        status.textContent = `VALIDADO: ${file.name} • ${samples.length.toLocaleString('pt-BR')} amostras • ${(duration/1000).toFixed(3)} ms • transições A/B: ${parsed.ea}/${parsed.eb} • roda/arraste = scroll • Ctrl/⌘ + roda = zoom` + (parsed.discarded ? ` • ${parsed.discarded} antigas ignoradas` : '');
+        status.textContent = `VALIDADO: ${file.name} • ${samples.length.toLocaleString('pt-BR')} amostras • ${(duration/1000).toFixed(3)} ms • transições A/B: ${parsed.ea}/${parsed.eb} • roda/arraste = scroll • Ctrl/⌘ + roda = zoom` + (parsed.repaired ? ` • ${parsed.repaired} timestamp(s) reparado(s)` : '') + (parsed.discarded ? ` • ${parsed.discarded} antigas ignoradas` : '');
         draw();
         scheduleAutomaticDecode();
       } catch (error) {

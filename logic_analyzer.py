@@ -83,6 +83,7 @@ class AnalyzerModel:
             # descarte somente essa linha, nunca toda a volta já registrada.
             if self.samples and us < self.samples[-1].us:
                 self.malformed_samples += 1
+                self.version += 1
                 return
             self.samples.append(Sample(us, bits))
             if self.recording_file is not None:
@@ -1137,7 +1138,7 @@ def read_capture_csv(path: str) -> tuple[list[Sample], int]:
     for index in range(1, len(rows)):
         if rows[index].us < rows[index - 1].us:
             start = index
-    return rows[start:], start + repaired
+    return rows[start:], start
 
 
 def write_web_viewer(path: Path, samples: list[Sample], source_name: str):
