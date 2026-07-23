@@ -21,13 +21,17 @@
     button:hover{background:#a8c7fa18}button:disabled{opacity:.45;cursor:wait}.primary{background:var(--primary);color:var(--onprimary);border:0}
     #position{width:min(240px,18vw);accent-color:var(--primary)}
     #status{padding:10px 20px;background:#1e2026;border-bottom:1px solid var(--outline);white-space:pre-wrap;color:var(--muted)}
-    #status.ok{color:var(--green)}#status.error{color:var(--error)}
+    #status.ok{color:var(--green)}#status.error{color:var(--error)}#status.saving{color:var(--primary)}
+    #status.saving::before{content:"";display:inline-block;width:13px;height:13px;margin-right:9px;border:2px solid #a8c7fa55;border-top-color:var(--primary);border-radius:50%;vertical-align:-2px;animation:spin .8s linear infinite}
+    @keyframes spin{to{transform:rotate(360deg)}}
     main{display:grid;grid-template-rows:minmax(330px,1fr) auto;gap:12px;padding:12px;min-height:0;overflow:hidden}
     .scope-card{min-height:0;overflow:hidden;background:#000;border:1px solid var(--outline);border-radius:18px;box-shadow:0 2px 8px #0008}
-    canvas{display:block;width:100%;height:100%;min-height:330px;background:#000}
+    canvas{display:block;width:100%;height:100%;min-height:330px;background:#000;cursor:grab;touch-action:none;user-select:none}
+    canvas.dragging{cursor:grabbing}
     #decoderPanel{display:none;background:var(--surface);border:1px solid var(--outline);border-radius:18px;overflow:hidden;max-height:300px}
     .decoder-head{display:flex;align-items:center;gap:12px;padding:10px 14px;border-bottom:1px solid var(--outline)}.decoder-head strong{margin-right:auto}.decoder-body{overflow:auto;max-height:235px}
     table{width:100%;border-collapse:collapse;font:12px Menlo,monospace}th{position:sticky;top:0;background:#292a30;color:var(--muted);text-align:left;padding:9px}td{padding:8px 9px;border-top:1px solid #34353b;vertical-align:top}td.code{word-break:break-all;color:#d7e3ff}.hint{color:var(--muted);font-size:12px}
+    .live{display:inline-flex;align-items:center;gap:5px;margin-left:8px;color:var(--green);font-size:10px;font-weight:800;letter-spacing:.5px}.live::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 0 0 #81c99588;animation:pulse 1.6s infinite}@keyframes pulse{70%{box-shadow:0 0 0 7px #81c99500}}
     .a{color:var(--cyan)}.b{color:var(--magenta)}
     @media(max-width:1100px){header{align-items:flex-start}.brand{flex-basis:125px}.brand h1{font-size:18px}.toolbar{gap:6px}.group{padding:5px}button{padding:0 11px}#position{width:150px}}
     @media(max-height:720px){header{padding:8px 12px}main{grid-template-rows:minmax(260px,1fr) auto;padding:8px}.decoder-body{max-height:180px}#decoderPanel{max-height:235px}}
@@ -36,13 +40,13 @@
 <body>
   <header><div class="brand"><h1>LogicLab</h1><small>Analisador lógico</small></div><div class="toolbar">
     <div class="group"><label class="field"><span>PORTA SERIAL</span><select id="port"><option value="">Porta serial</option></select></label><button id="refresh" title="Atualizar portas">↻</button><button id="connect">Conectar</button><button id="capture" class="primary">Capturar</button></div>
-    <div class="group"><label class="file">Importar CSV<input id="file" type="file" accept=".csv,text/csv"></label><button id="exportReplay">Exportar replay</button><button id="analyze">Repetição</button><button id="decode">HEX / DEC</button></div>
+    <div class="group"><label class="file">Importar CSV<input id="file" type="file" accept=".csv,text/csv"></label><button id="exportCsv">Exportar CSV</button><button id="exportReplay">Exportar replay</button><button id="analyze">Repetição</button><button id="decode">Decodificar UART</button></div>
     <div class="group"><label class="field"><span>JANELA</span><select id="window"><option value="40">40 transições</option><option value="80" selected>80 transições</option><option value="160">160 transições</option><option value="320">320 transições</option><option value="0">Captura inteira</option></select></label><button id="zoomOut">−</button><button id="zoomIn">+</button><label class="field"><span>POSIÇÃO</span><input id="position" type="range" min="0" max="0" value="0"></label></div>
     <div class="group"><span class="a">● Fio A</span><span class="b">● Fio B</span></div>
   </div></header>
   <div id="status">Aguardando arquivo. Clique em “Selecionar CSV”.</div>
   <main><section class="scope-card"><canvas id="scope"></canvas></section>
-  <section id="decoderPanel"><div class="decoder-head"><strong>Decodificador de quadros</strong><span class="hint" id="decoderMeta"></span><label class="field"><span>ALINHAMENTO</span><select id="decodeOffset"><option value="0">offset 0</option><option value="1">offset 1</option><option value="2">offset 2</option><option value="3">offset 3</option><option value="4">offset 4</option><option value="5">offset 5</option><option value="6">offset 6</option><option value="7">offset 7</option></select></label><label class="field"><span>ORDEM</span><select id="decodeOrder"><option value="msb">MSB primeiro</option><option value="lsb">LSB primeiro</option></select></label><button id="closeDecoder">✕</button></div><div class="decoder-body"><table><thead><tr><th>#</th><th>Padrão</th><th>Tempo</th><th>Bits</th><th>HEX</th><th>DECIMAL</th><th>ASCII</th></tr></thead><tbody id="decodeRows"></tbody></table></div></section>
+  <section id="decoderPanel"><div class="decoder-head"><strong>UART 57.600 baud • 8N1 <span class="live">AUTO</span></strong><span class="hint" id="decoderMeta"></span><label class="field"><span>CANAL</span><select id="decodeWire"><option value="ALL">Fios A + B</option><option value="A">Somente Fio A</option><option value="B">Somente Fio B</option></select></label><label class="field"><span>CAMPO 16-BIT</span><select id="decodeOffset"><option value="0">bytes 0–1</option><option value="1">bytes 1–2</option><option value="2">bytes 2–3</option><option value="3">bytes 3–4</option><option value="4">bytes 4–5</option><option value="5" selected>bytes 5–6</option><option value="6">bytes 6–7</option><option value="7">bytes 7–8</option><option value="8">bytes 8–9</option><option value="9">bytes 9–10</option><option value="10">bytes 10–11</option><option value="11">bytes 11–12</option><option value="12">bytes 12–13</option></select></label><label class="field"><span>INTERPRETAÇÃO</span><select id="decodeOrder"><option value="u16le">uint16 LE</option><option value="s16le">int16 LE</option><option value="u16be">uint16 BE</option></select></label><button id="closeDecoder">✕</button></div><div class="decoder-body"><table><thead><tr><th>#</th><th>Fio / padrão</th><th>Tempo</th><th>Bytes</th><th>HEX UART</th><th>Campo 16-bit</th><th>Checksum</th></tr></thead><tbody id="decodeRows"></tbody></table></div></section>
   </main>
   <script>
     const input = document.getElementById('file');
@@ -59,8 +63,10 @@
     const analyze = document.getElementById('analyze');
     const decode = document.getElementById('decode');
     const exportReplay = document.getElementById('exportReplay');
+    const exportCsv = document.getElementById('exportCsv');
     const decoderPanel = document.getElementById('decoderPanel');
     const decoderMeta = document.getElementById('decoderMeta');
+    const decodeWire = document.getElementById('decodeWire');
     const decodeOffset = document.getElementById('decodeOffset');
     const decodeOrder = document.getElementById('decodeOrder');
     const decodeRows = document.getElementById('decodeRows');
@@ -74,7 +80,14 @@
     let controlBusy = false;
     let connectedState = false;
     let capturingState = false;
+    let finalizingState = false;
     let decodedResult = null;
+    let autoDecodeBusy = false;
+    let autoDecodeTimer = null;
+    let lastDecodedVersion = -1;
+    let draggingGraph = false;
+    let dragStartX = 0;
+    let dragStartPosition = 0;
 
     function apiCall(method, args=[], timeout=6000) {
       const call = window.pywebview.api[method](...args);
@@ -98,25 +111,101 @@
       else { button.disabled = false; if (button.dataset.label) { button.textContent = button.dataset.label; delete button.dataset.label; } }
     }
 
+    function parseCsvInWorker(file) {
+      const source = `
+        self.onmessage = async event => {
+          try {
+            const file = event.data;
+            const text = await file.text();
+            const lines = text.replace(/^\\uFEFF/, '').trim().split(/\\r?\\n/);
+            const header = lines.shift().split(',').map(v => v.trim());
+            const ti = header.indexOf('tempo_us'), ai = header.indexOf('fio_A_D2'), bi = header.indexOf('fio_B_D3');
+            if (ti < 0 || ai < 0 || bi < 0) throw new Error('Colunas obrigatórias: tempo_us, fio_A_D2, fio_B_D3');
+            let latest = [], discarded = 0, ea = 0, eb = 0;
+            for (let n = 0; n < lines.length; n++) {
+              if (!lines[n].trim()) continue;
+              const cells = lines[n].split(',');
+              const t = Number(cells[ti]), a = Number(cells[ai]), b = Number(cells[bi]);
+              if (!Number.isFinite(t) || ![0,1].includes(a) || ![0,1].includes(b)) throw new Error('Valor inválido na linha ' + (n + 2));
+              if (latest.length && t < latest[latest.length - 1][0]) { discarded += latest.length; latest = []; ea = 0; eb = 0; }
+              if (latest.length) { ea += a !== latest[latest.length - 1][1]; eb += b !== latest[latest.length - 1][2]; }
+              latest.push([t, a, b]);
+            }
+            if (latest.length < 2) throw new Error('O arquivo precisa conter pelo menos duas amostras');
+            self.postMessage({ok:true, samples:latest, discarded, ea, eb});
+          } catch (error) { self.postMessage({ok:false, error:error.message || String(error)}); }
+        };`;
+      const url = URL.createObjectURL(new Blob([source], {type:'text/javascript'}));
+      const worker = new Worker(url);
+      return new Promise((resolve, reject) => {
+        worker.onmessage = event => {
+          worker.terminate(); URL.revokeObjectURL(url);
+          event.data.ok ? resolve(event.data) : reject(new Error(event.data.error));
+        };
+        worker.onerror = event => {
+          worker.terminate(); URL.revokeObjectURL(url);
+          reject(new Error(event.message || 'Falha na thread de importação'));
+        };
+        worker.postMessage(file);
+      });
+    }
+
     function escapeHtml(value) {
       return String(value).replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
     }
     function renderDecoder() {
       if (!decodedResult) return;
-      const offset = Number(decodeOffset.value), order = decodeOrder.value;
-      decoderMeta.textContent = `${decodedResult.frames.length} quadros • ${decodedResult.unique_patterns || '?'} padrões • unidade ${decodedResult.unit_us.toFixed(2)} µs • hipótese ${order.toUpperCase()}, offset ${offset}`;
-      decodeRows.innerHTML = decodedResult.frames.slice(0,64).map(frame => {
-        const candidate = frame.alignments.find(item => item.offset === offset);
-        if (!candidate) return '';
-        const hex = candidate[`hex_${order}`], dec = candidate[`dec_${order}`], ascii = candidate[`ascii_${order}`];
-        return `<tr><td>${frame.number}</td><td><strong>${frame.pattern}</strong> <span class="hint">(×${frame.repeat_count})</span></td><td>${(frame.start_us/1000).toFixed(3)} ms</td><td>${frame.bits.length}</td><td class="code">${escapeHtml(hex)}</td><td class="code">${escapeHtml(dec)}</td><td class="code">${escapeHtml(ascii)}</td></tr>`;
+      const offset = Number(decodeOffset.value), interpretation = decodeOrder.value;
+      const selectedWire = decodeWire.value;
+      const channels = decodedResult.channels.filter(channel => selectedWire === 'ALL' || channel.wire === selectedWire);
+      const events = decodedResult.events.filter(frame => selectedWire === 'ALL' || frame.wire === selectedWire);
+      const totalBytes = channels.reduce((sum, channel) => sum + channel.bytes, 0);
+      const errors = channels.reduce((sum, channel) => sum + channel.framing_errors, 0);
+      const label = selectedWire === 'ALL' ? 'Fios A + B' : `Fio ${selectedWire}`;
+      decoderMeta.textContent = `${label} • ${events.length} quadros • ${totalBytes} bytes • ${decodedResult.baud} baud • 8N1 • ${errors} erros de framing`;
+      decodeRows.innerHTML = events.slice(0,128).map(frame => {
+        const field = frame.numeric.find(item => item.offset === offset);
+        const checksumNames = Object.entries(frame.checksum).filter(([,valid]) => valid).map(([name]) => name).join(', ') || 'não identificado';
+        return `<tr><td>${frame.number}</td><td><strong class="${frame.wire==='A'?'a':'b'}">Fio ${frame.wire}</strong> / ${frame.pattern} <span class="hint">(×${frame.repeat_count})</span></td><td>${(frame.start_us/1000).toFixed(3)} ms</td><td>${frame.values.length}</td><td class="code">${escapeHtml(frame.hex)}</td><td class="code">${field ? `${interpretation} = ${field[interpretation]}` : '—'}</td><td class="code">${checksumNames}</td></tr>`;
       }).join('');
       decoderPanel.style.display='block';
       requestAnimationFrame(draw);
     }
+    function scheduleAutomaticDecode(delay=500) {
+      if (decoderPanel.style.display !== 'block' || !samples.length) return;
+      if (autoDecodeTimer !== null) return;
+      autoDecodeTimer = setTimeout(() => {
+        autoDecodeTimer=null;
+        refreshDecoderAutomatically();
+      }, delay);
+    }
+    async function refreshDecoderAutomatically() {
+      if (autoDecodeBusy || analysisBusy || decoderPanel.style.display !== 'block' || !samples.length) {
+        if (decoderPanel.style.display === 'block') scheduleAutomaticDecode(700);
+        return;
+      }
+      autoDecodeBusy=true;
+      try {
+        const result = await threadCall('decode_uart_samples',[samples.slice(-20000),57600],15000);
+        if (decoderPanel.style.display !== 'block') return;
+        decodedResult=result;
+        lastDecodedVersion=modelVersion;
+        renderDecoder();
+      } catch (error) {
+        decoderMeta.textContent=`Falha na atualização automática: ${error.message || error}`;
+      } finally {
+        autoDecodeBusy=false;
+      }
+    }
     decodeOffset.addEventListener('change', renderDecoder);
     decodeOrder.addEventListener('change', renderDecoder);
-    closeDecoder.addEventListener('click', () => { decoderPanel.style.display='none'; requestAnimationFrame(draw); });
+    decodeWire.addEventListener('change', renderDecoder);
+    closeDecoder.addEventListener('click', () => {
+      clearTimeout(autoDecodeTimer);
+      autoDecodeTimer=null;
+      decoderPanel.style.display='none';
+      requestAnimationFrame(draw);
+    });
 
     function requirePython() {
       if (nativeReady) return true;
@@ -153,7 +242,7 @@
       if (!connectedState && !port.value) { status.className='error'; status.textContent='Selecione uma porta serial.'; return; }
       controlBusy=true; setButtonBusy(connect,true,connectedState?'Desconectando…':'Conectando…');
       try {
-        const result = connectedState ? await threadCall('disconnect') : await threadCall('connect',[port.value,115200]);
+        const result = connectedState ? await threadCall('disconnect') : await threadCall('connect',[port.value,1000000]);
         status.className = result.ok ? 'ok' : 'error'; status.textContent = result.message;
         if (result.ok) connectedState=!connectedState;
       } catch (error) { status.className='error'; status.textContent=`ERRO DE CONEXÃO: ${error.message || error}`; }
@@ -161,14 +250,34 @@
     });
     capture.addEventListener('click', async () => {
       if (!requirePython()) return;
-      if (controlBusy) return;
-      controlBusy=true; const starting=!capturingState; setButtonBusy(capture,true,starting?'Iniciando…':'Parando…');
+      if (controlBusy || finalizingState) return;
+      controlBusy=true;
+      const starting=!capturingState;
+      const previousState=capturingState;
+      // Atualização otimista: "Parar" aparece no mesmo instante do clique.
+      capturingState=starting;
+      capture.textContent=starting?'Parar':'Capturar';
+      capture.classList.toggle('primary',starting);
+      status.className='';
+      status.textContent=starting?'Iniciando captura…':'Enviando STOP…';
       try {
         const result = starting ? await threadCall('capture',[true]) : await threadCall('stop_capture');
         status.className = result.ok ? 'ok' : 'error'; status.textContent = result.message;
-        if (result.ok) capturingState=starting;
+        if (!result.ok) capturingState=previousState;
+        if (result.ok && !starting) {
+          finalizingState=true;
+          status.className='saving';
+          capture.disabled=true;
+          capture.textContent='Salvando…';
+        }
       } catch(error) { status.className='error'; status.textContent=`ERRO NA CAPTURA: ${error.message || error}`; }
-      finally { controlBusy=false; setButtonBusy(capture,false); capture.textContent=capturingState?'Parar':'Capturar'; }
+      finally {
+        if (status.className==='error') capturingState=previousState;
+        controlBusy=false;
+        capture.disabled=finalizingState;
+        capture.textContent=finalizingState?'Salvando…':(capturingState?'Parar':'Capturar');
+        capture.classList.toggle('primary',capturingState);
+      }
     });
     exportReplay.addEventListener('click', async () => {
       if (!samples.length) { status.className='error'; status.textContent='Nenhuma amostra para exportar.'; return; }
@@ -180,6 +289,16 @@
       } catch(error) { status.className='error'; status.textContent=`ERRO AO EXPORTAR: ${error.message || error}`; }
       finally { analysisBusy=false; setButtonBusy(exportReplay,false); }
     });
+    exportCsv.addEventListener('click', async () => {
+      if (!samples.length) { status.className='error'; status.textContent='Nenhuma amostra para exportar.'; return; }
+      if (!requirePython() || analysisBusy) return;
+      analysisBusy=true; setButtonBusy(exportCsv,true,'Exportando…');
+      try {
+        const result = await threadCall('export_csv',[[]],60000);
+        status.className=result.ok?'ok':'error'; status.textContent=result.message;
+      } catch(error) { status.className='error'; status.textContent=`ERRO AO EXPORTAR CSV: ${error.message || error}`; }
+      finally { analysisBusy=false; setButtonBusy(exportCsv,false); }
+    });
     async function pollPython() {
       if (!nativeReady || pollBusy) return;
       if (controlBusy || analysisBusy) { setTimeout(pollPython,300); return; }
@@ -187,12 +306,25 @@
       try {
         const result = await apiCall('poll',[modelVersion],2500);
         modelVersion = result.version;
+        const wasFinalizing=finalizingState;
         connectedState=Boolean(result.connected); capturingState=Boolean(result.capturing);
+        finalizingState=Boolean(result.finalizing);
         connect.textContent = connectedState ? 'Desconectar' : 'Conectar';
-        capture.textContent = capturingState ? 'Parar' : 'Capturar';
+        capture.disabled=finalizingState;
+        capture.textContent = finalizingState ? 'Salvando…' : (capturingState ? 'Parar' : 'Capturar');
+        capture.classList.toggle('primary',capturingState);
         if (result.samples && result.samples.length) {
           samples = result.samples; visibleCount = Math.min(80, samples.length); updateScroll(true); draw();
-          status.className = 'ok'; status.textContent = `CAPTURA: ${samples.length.toLocaleString('pt-BR')} amostras` + (result.messages.length ? ` • ${result.messages[result.messages.length-1]}` : '');
+          if (modelVersion !== lastDecodedVersion) scheduleAutomaticDecode();
+        }
+        if (finalizingState) {
+          status.className='saving';
+          status.textContent=`Finalizando captura… ${Number(result.stored_samples || samples.length).toLocaleString('pt-BR')} amostras recebidas • gravando o restante no CSV. Não desconecte o Arduino.`;
+        } else if (wasFinalizing && result.saved_path) {
+          status.className='ok';
+          status.textContent=`CAPTURA CONCLUÍDA • ${Number(result.stored_samples || samples.length).toLocaleString('pt-BR')} amostras • CSV completo salvo em: ${result.saved_path}`;
+        } else if (result.samples && result.samples.length) {
+          status.className = 'ok'; status.textContent = `CAPTURA: ${Number(result.stored_samples || samples.length).toLocaleString('pt-BR')} amostras no Python • exibindo as ${samples.length.toLocaleString('pt-BR')} mais recentes` + (result.messages.length ? ` • ${result.messages[result.messages.length-1]}` : '');
         }
       } catch (error) {
         status.className='error'; status.textContent=`ERRO DE COMUNICAÇÃO: ${error.message || error}`;
@@ -219,11 +351,14 @@
       if (analysisBusy) return;
       analysisBusy=true; setButtonBusy(decode,true,'Decodificando…'); status.className=''; status.textContent='Decodificando pulsos…';
       try {
-        const result = await threadCall('decode_samples',[samples.slice(-5000),1],15000);
-        if (!result.frames.length) { status.className='error'; status.textContent='Nenhum quadro decodificável encontrado no fio B.'; return; }
+        const result = await threadCall('decode_uart_samples',[samples.slice(-20000),57600],15000);
+        if (!result.events.length) { status.className='error'; status.textContent='Nenhum quadro UART 8N1 foi encontrado.'; return; }
         decodedResult = result;
+        lastDecodedVersion=modelVersion;
         renderDecoder();
-        status.className='ok'; status.textContent=`${result.frames.length} quadro(s) convertido(s). Escolha o alinhamento e a ordem de bits no painel.`;
+        scheduleAutomaticDecode(900);
+        const bytesA=result.channels[0].bytes, bytesB=result.channels[1].bytes;
+        status.className='ok'; status.textContent=`UART 57.600 8N1: ${result.events.length} quadro(s), Fio A=${bytesA} bytes, Fio B=${bytesB} bytes. Compare campos durante movimentos controlados.`;
       } catch (error) { status.className='error'; status.textContent=`ERRO NO DECODIFICADOR: ${error.message || error}`; }
       finally { analysisBusy=false; setButtonBusy(decode,false); }
     });
@@ -232,31 +367,17 @@
       const file = input.files[0];
       if (!file) return;
       try {
-        const text = await file.text();
-        const lines = text.replace(/^\uFEFF/, '').trim().split(/\r?\n/);
-        const header = lines.shift().split(',').map(v => v.trim());
-        const ti = header.indexOf('tempo_us'), ai = header.indexOf('fio_A_D2'), bi = header.indexOf('fio_B_D3');
-        if (ti < 0 || ai < 0 || bi < 0) throw new Error('Colunas obrigatórias: tempo_us, fio_A_D2, fio_B_D3');
-        let latest = [], discarded = 0;
-        for (let n = 0; n < lines.length; n++) {
-          if (!lines[n].trim()) continue;
-          const cells = lines[n].split(',');
-          const t = Number(cells[ti]), a = Number(cells[ai]), b = Number(cells[bi]);
-          if (!Number.isFinite(t) || ![0,1].includes(a) || ![0,1].includes(b)) throw new Error(`Valor inválido na linha ${n + 2}`);
-          if (latest.length && t < latest[latest.length - 1][0]) { discarded += latest.length; latest = []; }
-          latest.push([t, a, b]);
-        }
-        if (latest.length < 2) throw new Error('O arquivo precisa conter pelo menos duas amostras');
-        samples = latest;
+        status.className='saving'; status.textContent=`Importando ${file.name} em uma thread separada…`;
+        const parsed = await parseCsvInWorker(file);
+        samples = parsed.samples;
         visibleCount = Math.min(80, samples.length);
         windowSelect.value = '80';
         updateScroll(true);
-        let ea = 0, eb = 0;
-        for (let i = 1; i < samples.length; i++) { ea += samples[i][1] !== samples[i-1][1]; eb += samples[i][2] !== samples[i-1][2]; }
         const duration = samples[samples.length - 1][0] - samples[0][0];
         status.className = 'ok';
-        status.textContent = `VALIDADO: ${file.name} • ${samples.length.toLocaleString('pt-BR')} amostras • ${(duration/1000).toFixed(3)} ms • transições A/B: ${ea}/${eb}` + (discarded ? ` • ${discarded} antigas ignoradas` : '');
+        status.textContent = `VALIDADO: ${file.name} • ${samples.length.toLocaleString('pt-BR')} amostras • ${(duration/1000).toFixed(3)} ms • transições A/B: ${parsed.ea}/${parsed.eb} • roda/arraste = scroll • Ctrl/⌘ + roda = zoom` + (parsed.discarded ? ` • ${parsed.discarded} antigas ignoradas` : '');
         draw();
+        scheduleAutomaticDecode();
       } catch (error) {
         samples = [];
         status.className = 'error';
@@ -282,22 +403,51 @@
       draw();
     }
     windowSelect.addEventListener('change', () => {
-      visibleCount = Number(windowSelect.value) || samples.length;
+      // Desenhar centenas de milhares de segmentos em um único frame congela
+      // o WebKit. A captura continua completa; a visão integral é limitada e
+      // o restante permanece acessível pelo scroll.
+      visibleCount = Number(windowSelect.value) || Math.min(samples.length, 20000);
       updateScroll(); draw();
     });
     position.addEventListener('input', draw);
     zoomIn.addEventListener('click', () => setZoom(visibleCount / 1.6));
     zoomOut.addEventListener('click', () => setZoom(visibleCount * 1.6));
+    function panGraph(delta) {
+      position.value = String(Math.max(0, Math.min(Number(position.max), Number(position.value) + delta)));
+      draw();
+    }
     canvas.addEventListener('wheel', event => {
       event.preventDefault();
-      if (event.shiftKey || Math.abs(event.deltaX) > Math.abs(event.deltaY)) {
-        const step = Math.max(1, Math.round(visibleCount / 10));
-        position.value = String(Math.max(0, Math.min(Number(position.max), Number(position.value) + Math.sign(event.deltaX || event.deltaY) * step)));
-        draw();
-      } else {
+      if (event.ctrlKey || event.metaKey) {
         setZoom(event.deltaY < 0 ? visibleCount / 1.25 : visibleCount * 1.25);
+      } else {
+        const raw = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
+        const step = Math.max(1, Math.round(visibleCount / 12));
+        panGraph(Math.sign(raw) * step);
       }
     }, {passive:false});
+    canvas.addEventListener('pointerdown', event => {
+      if (!samples.length) return;
+      draggingGraph=true;
+      dragStartX=event.clientX;
+      dragStartPosition=Number(position.value);
+      canvas.classList.add('dragging');
+      canvas.setPointerCapture(event.pointerId);
+    });
+    canvas.addEventListener('pointermove', event => {
+      if (!draggingGraph) return;
+      const width=Math.max(1,canvas.getBoundingClientRect().width);
+      const deltaSamples=Math.round((dragStartX-event.clientX)/width*visibleCount);
+      position.value=String(Math.max(0,Math.min(Number(position.max),dragStartPosition+deltaSamples)));
+      draw();
+    });
+    function finishGraphDrag(event) {
+      draggingGraph=false;
+      canvas.classList.remove('dragging');
+      if (event && canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
+    }
+    canvas.addEventListener('pointerup',finishGraphDrag);
+    canvas.addEventListener('pointercancel',finishGraphDrag);
     function draw() {
       const rect = canvas.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
       const w = Math.max(500, rect.width), h = Math.max(420, rect.height);

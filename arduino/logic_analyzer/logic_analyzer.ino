@@ -1,21 +1,20 @@
-/* LogicLab — leitor passivo de protocolo proprietário de dois fios
+/* LogicLab — captura passiva contínua de duas linhas no Arduino Mega
  *
- * CAPTURA
- *   Fio A: D2 / PE4 / INT4
- *   Fio B: D3 / PE5 / INT5
+ * Entradas: D2/INT4 (Fio A) e D3/INT5 (Fio B).
  *
- * INT4 e INT5 disparam em qualquer mudança. Cada evento guarda o estado das
- * duas linhas e um timestamp de 0,5 us. Não há Serial.print() durante captura
- * e nunca dirige o barramento observado.
+ * As transições não ficam acumuladas na SRAM. A ISR coloca cada evento em um
+ * buffer circular e o loop transmite continuamente ao aplicativo Python. Isso
+ * permite capturas longas; o limite prático passa a ser o disco/RAM do Mac.
+ *
+ * IMPORTANTE: o aplicativo e este firmware usam 1.000.000 baud.
  */
 
 #include <Arduino.h>
 #include <avr/interrupt.h>
 #include <util/atomic.h>
 
-// 1.100 x 5 bytes = 5.500 bytes. Mantém margem da SRAM do Mega para
-// pilha, buffers seriais e variáveis globais.
-constexpr uint16_t CAPTURE_CAPACITY = 1100;
+constexpr uint32_t SERIAL_BAUD = 1000000UL;
+constexpr uint16_t STREAM_CAPACITY = 1024;  // 5.120 bytes dos 8 KB do Mega
 constexpr uint8_t INPUT_MASK = _BV(PE4) | _BV(PE5);
 
 struct __attribute__((packed)) Sample {
@@ -23,20 +22,22 @@ struct __attribute__((packed)) Sample {
   uint8_t bits;
 };
 
-Sample samples[CAPTURE_CAPACITY];
+Sample streamBuffer[STREAM_CAPACITY];
+volatile uint16_t streamHead = 0;
+volatile uint16_t streamTail = 0;
 volatile uint32_t timer1High = 0;
-volatile uint16_t sampleCount = 0;
+volatile uint32_t droppedSamples = 0;
+volatile uint32_t edgeCountA = 0;
+volatile uint32_t edgeCountB = 0;
 volatile bool capturing = false;
-volatile bool bufferFull = false;
-volatile uint16_t edgeCountA = 0;
-volatile uint16_t edgeCountB = 0;
-bool dumpPending = false;
+bool finishPending = false;
+uint32_t captureOrigin = 0;
+uint8_t initialBits = 0;
+uint8_t finalBits = 0;
 char command[10];
 uint8_t commandLength = 0;
 
-ISR(TIMER1_OVF_vect) {
-  timer1High += 0x10000UL;
-}
+ISR(TIMER1_OVF_vect) { timer1High += 0x10000UL; }
 
 inline __attribute__((always_inline)) uint32_t timerTicksISR() {
   uint32_t high = timer1High;
@@ -55,89 +56,95 @@ inline __attribute__((always_inline)) uint8_t readInputLines() {
   return (PINE >> PE4) & 0x03;
 }
 
-inline __attribute__((always_inline)) void recordTransition() {
-  if (!capturing) return;
-
-  const uint8_t state = readInputLines();
-  const uint16_t index = sampleCount;
-  // Defesa contra qualquer inconsistência de estado: evita acesso fora do
-  // buffer antes de consultar samples[index - 1].
-  if (index == 0 || index >= CAPTURE_CAPACITY) {
-    capturing = false;
-    bufferFull = true;
-    EIMSK &= ~(_BV(INT4) | _BV(INT5));
+inline __attribute__((always_inline)) void enqueueISR(uint32_t ticks, uint8_t bits) {
+  uint16_t next = streamHead + 1;
+  if (next == STREAM_CAPACITY) next = 0;
+  if (next == streamTail) {
+    ++droppedSamples;
     return;
   }
-  const uint8_t changed = state ^ samples[index - 1].bits;
-  if (!changed) return;  // mesma mudança vista pelas 2 ISRs
+  streamBuffer[streamHead].ticks = ticks;
+  streamBuffer[streamHead].bits = bits;
+  streamHead = next;
+}
+
+inline __attribute__((always_inline)) void recordTransition() {
+  if (!capturing) return;
+  const uint8_t state = readInputLines();
+  const uint8_t changed = state ^ finalBits;
+  if (!changed) return;
   if (changed & 0x01) ++edgeCountA;
   if (changed & 0x02) ++edgeCountB;
-  PORTB |= _BV(PB7);  // LED 13: pelo menos uma transição foi detectada
-
-  samples[index].ticks = timerTicksISR();
-  samples[index].bits = state;
-  sampleCount = index + 1;
-
-  if (sampleCount >= CAPTURE_CAPACITY) {
-    capturing = false;
-    bufferFull = true;
-    EIMSK &= ~(_BV(INT4) | _BV(INT5));
-  }
+  finalBits = state;
+  PORTB |= _BV(PB7);
+  enqueueISR(timerTicksISR(), state);
 }
 
 ISR(INT4_vect) { recordTransition(); }
 ISR(INT5_vect) { recordTransition(); }
 
+bool dequeueSample(Sample &sample) {
+  bool available = false;
+  ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
+    if (streamTail != streamHead) {
+      sample = streamBuffer[streamTail];
+      uint16_t next = streamTail + 1;
+      if (next == STREAM_CAPACITY) next = 0;
+      streamTail = next;
+      available = true;
+    }
+  }
+  return available;
+}
+
+bool streamEmpty() {
+  bool empty;
+  ATOMIC_BLOCK(ATOMIC_RESTORESTATE) { empty = streamTail == streamHead; }
+  return empty;
+}
+
 void startCapture() {
   EIMSK &= ~(_BV(INT4) | _BV(INT5));
-  sampleCount = 1;
-  edgeCountA = 0;
-  edgeCountB = 0;
-  bufferFull = false;
-  dumpPending = false;
-  samples[0].ticks = timerTicks();
-  samples[0].bits = readInputLines();
+  streamHead = streamTail = 0;
+  droppedSamples = 0;
+  edgeCountA = edgeCountB = 0;
+  finishPending = false;
+  initialBits = finalBits = readInputLines();
+  captureOrigin = timerTicks();
   PORTB &= ~_BV(PB7);
-  EIFR = _BV(INTF4) | _BV(INTF5);  // limpa flags antigas
+
+  Serial.println(F("#CAPTURE,STREAM"));
+  // O primeiro estado estabelece o nível anterior às transições.
+  streamBuffer[0].ticks = captureOrigin;
+  streamBuffer[0].bits = initialBits;
+  streamHead = 1;
+
+  EIFR = _BV(INTF4) | _BV(INTF5);
   capturing = true;
   EIMSK |= _BV(INT4) | _BV(INT5);
 }
 
 void stopCapture() {
   EIMSK &= ~(_BV(INT4) | _BV(INT5));
-  if (capturing || bufferFull) {
+  if (capturing) {
     capturing = false;
-    dumpPending = true;
+    finishPending = true;
   }
 }
 
-void dumpCapture() {
-  const uint16_t count = sampleCount;
-  Serial.print(F("#CAPTURE,"));
-  Serial.print(count);
-  if (bufferFull) Serial.print(F(",FULL"));
-  Serial.println();
-
+void finishCapture() {
   Serial.print(F("#DEBUG,edgesA="));
   Serial.print(edgeCountA);
   Serial.print(F(",edgesB="));
   Serial.print(edgeCountB);
+  Serial.print(F(",dropped="));
+  Serial.print(droppedSamples);
   Serial.print(F(",initial="));
-  Serial.print(samples[0].bits);
+  Serial.print(initialBits);
   Serial.print(F(",final="));
-  Serial.print(samples[count - 1].bits);
-  Serial.print(F(",duration_us="));
-  Serial.println((samples[count - 1].ticks - samples[0].ticks) >> 1);
-
-  const uint32_t origin = samples[0].ticks;
-  for (uint16_t i = 0; i < count; ++i) {
-    Serial.print(F("D,"));
-    Serial.print((samples[i].ticks - origin) >> 1);
-    Serial.print(',');
-    Serial.println(samples[i].bits);
-  }
+  Serial.println(finalBits);
   Serial.println(F("#END"));
-  dumpPending = false;
+  finishPending = false;
 }
 
 void executeCommand() {
@@ -161,33 +168,37 @@ void pollCommand() {
   }
 }
 
-void setup() {
-  Serial.begin(115200);
-  DDRB |= _BV(DDB7);   // LED integrado do Mega (D13)
-  PORTB &= ~_BV(PB7);
+void transmitStream() {
+  Sample sample;
+  // Um pequeno lote mantém STOP responsivo e deixa o RX ser consultado sempre.
+  for (uint8_t sent = 0; sent < 24 && dequeueSample(sample); ++sent) {
+    Serial.print(F("D,"));
+    Serial.print((sample.ticks - captureOrigin) >> 1);
+    Serial.print(',');
+    Serial.println(sample.bits);
+  }
+}
 
-  // D2/D3 como entradas. Pull-ups desligados para observar o barramento sem
-  // alterar seus níveis; use resistores externos quando necessários.
+void setup() {
+  Serial.begin(SERIAL_BAUD);
+  DDRB |= _BV(DDB7);
+  PORTB &= ~_BV(PB7);
   DDRE &= ~INPUT_MASK;
   PORTE &= ~INPUT_MASK;
 
-  // Timer1: modo normal, 16 MHz / 8 = 2 MHz (0,5 us por tick).
+  // Timer1: 16 MHz / 8 = 2 MHz, resolução de 0,5 µs.
   TCCR1A = 0;
   TCCR1B = _BV(CS11);
   TCNT1 = 0;
   TIMSK1 = _BV(TOIE1);
-
-  // ISC40/ISC50 = 1 e ISC41/ISC51 = 0: interrupção em qualquer mudança.
   EICRB = (EICRB & ~(_BV(ISC41) | _BV(ISC51))) |
           _BV(ISC40) | _BV(ISC50);
   EIMSK &= ~(_BV(INT4) | _BV(INT5));
-
-  Serial.println(F("#LogicLab 2-Wire pronto; entradas D2/INT4 e D3/INT5"));
+  Serial.println(F("#LogicLab STREAM pronto; 1000000 baud; D2/INT4 D3/INT5"));
 }
 
 void loop() {
-  // A captura acontece inteiramente nas interrupções INT4/INT5.
   pollCommand();
-  if (!capturing && bufferFull) dumpPending = true;
-  if (!capturing && dumpPending) dumpCapture();
+  transmitStream();
+  if (!capturing && finishPending && streamEmpty()) finishCapture();
 }

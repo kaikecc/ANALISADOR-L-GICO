@@ -7,8 +7,10 @@ Protocolo do firmware: linhas ASCII ``D,<micros>,<bits>`` e ``#<mensagem>``.
 from __future__ import annotations
 
 import csv
+import functools
 import glob
 import html
+import itertools
 import json
 import math
 import queue
@@ -66,21 +68,49 @@ class RepetitionResult:
 
 
 class AnalyzerModel:
-    def __init__(self, limit: int = 120_000):
+    def __init__(self, limit: int = 1_000_000):
         self.samples: deque[Sample] = deque(maxlen=limit)
         self.lock = threading.Lock()
         self.version = 0
+        self.recording_file = None
+        self.recording_path: Path | None = None
+        self.malformed_samples = 0
 
     def add(self, us: int, bits: int):
         with self.lock:
-            # Cada captura do firmware reinicia tempo_us em zero. Se pacotes de
-            # uma captura anterior ainda estiverem na serial, não misture as
-            # duas linhas do tempo: isso produz uma janela negativa e deixa o
-            # osciloscópio aparentemente vazio.
+            # A captura é limpa explicitamente antes de START. Um timestamp que
+            # volta durante a mesma aquisição é uma linha serial corrompida;
+            # descarte somente essa linha, nunca toda a volta já registrada.
             if self.samples and us < self.samples[-1].us:
-                self.samples.clear()
+                self.malformed_samples += 1
+                return
             self.samples.append(Sample(us, bits))
+            if self.recording_file is not None:
+                self.recording_file.write(f"{us},{bits & 1},{(bits >> 1) & 1}\n")
             self.version += 1
+
+    def start_recording(self, path: Path):
+        with self.lock:
+            if self.recording_file is not None:
+                self.recording_file.close()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            self.recording_file = path.open("w", encoding="utf-8", buffering=64 * 1024)
+            self.recording_file.write("tempo_us,fio_A_D2,fio_B_D3\n")
+            self.recording_path = path
+
+    def stop_recording(self) -> Path | None:
+        with self.lock:
+            if self.recording_file is not None:
+                self.recording_file.flush()
+                self.recording_file.close()
+                self.recording_file = None
+            return self.recording_path
+
+    def flush_recording(self) -> Path | None:
+        with self.lock:
+            if self.recording_file is not None:
+                self.recording_file.flush()
+            return self.recording_path
 
     def replace(self, samples: list[Sample]):
         with self.lock:
@@ -91,15 +121,33 @@ class AnalyzerModel:
     def clear(self):
         with self.lock:
             self.samples.clear()
+            self.malformed_samples = 0
             self.version += 1
+
+    def malformed_count(self) -> int:
+        with self.lock:
+            return self.malformed_samples
 
     def current_version(self) -> int:
         with self.lock:
             return self.version
 
+    def count(self) -> int:
+        with self.lock:
+            return len(self.samples)
+
     def snapshot(self) -> list[Sample]:
         with self.lock:
             return list(self.samples)
+
+    def snapshot_tail(self, limit: int) -> list[Sample]:
+        with self.lock:
+            if limit <= 0 or limit >= len(self.samples):
+                return list(self.samples)
+            # deque não oferece slicing; islice evita materializar toda a
+            # captura apenas para atualizar a janela recente do gráfico.
+            start = len(self.samples) - limit
+            return list(itertools.islice(self.samples, start, None))
 
 
 class SerialWorker:
@@ -1059,9 +1107,8 @@ def analyze_repetition(data: list[Sample], channel: int) -> RepetitionResult | N
 
 
 def read_capture_csv(path: str) -> tuple[list[Sample], int]:
-    """Lê o CSV e preserva a captura monotônica mais recente."""
-    latest: list[Sample] = []
-    total = 0
+    """Lê CSV e repara timestamps isolados truncados pela transmissão serial."""
+    rows: list[Sample] = []
     with open(path, newline="", encoding="utf-8-sig") as fp:
         reader = csv.DictReader(fp)
         required = {"tempo_us", "fio_A_D2", "fio_B_D3"}
@@ -1076,13 +1123,21 @@ def read_capture_csv(path: str) -> tuple[list[Sample], int]:
                 raise ValueError(f"Valor inválido na linha {line}") from exc
             if us < 0 or a not in (0, 1) or b not in (0, 1):
                 raise ValueError(f"Valor fora do intervalo na linha {line}")
-            if latest and us < latest[-1].us:
-                latest = []
-            latest.append(Sample(us, a | (b << 1)))
-            total += 1
-    if not latest:
+            rows.append(Sample(us, a | (b << 1)))
+    if not rows:
         raise ValueError("O CSV não contém amostras")
-    return latest, total - len(latest)
+    repaired = 0
+    for index in range(1, len(rows) - 1):
+        if rows[index].us < rows[index - 1].us < rows[index + 1].us:
+            rows[index].us = (rows[index - 1].us + rows[index + 1].us) // 2
+            repaired += 1
+    # Reinícios reais continuam separando capturas; preserve o trecho mais
+    # recente, mas timestamps isolados já não eliminam milhares de amostras.
+    start = 0
+    for index in range(1, len(rows)):
+        if rows[index].us < rows[index - 1].us:
+            start = index
+    return rows[start:], start + repaired
 
 
 def write_web_viewer(path: Path, samples: list[Sample], source_name: str):
@@ -1232,6 +1287,151 @@ def decode_hex_candidates(data: list[Sample], channel: int) -> dict:
         "unique_patterns": len(signatures),
         "frames": frames,
     }
+
+
+def _crc16_modbus(payload: list[int]) -> int:
+    crc = 0xFFFF
+    for value in payload:
+        crc ^= value
+        for _ in range(8):
+            crc = (crc >> 1) ^ 0xA001 if crc & 1 else crc >> 1
+    return crc
+
+
+def _crc16_kermit(payload: list[int]) -> int:
+    crc = 0x0000
+    for value in payload:
+        crc ^= value
+        for _ in range(8):
+            crc = (crc >> 1) ^ 0x8408 if crc & 1 else crc >> 1
+    return crc
+
+
+def decode_uart(data: list[Sample], channel: int, baud: int = 57600) -> dict:
+    """Decodifica UART 8N1 por amostragem no centro de cada bit."""
+    if len(data) < 2:
+        return {"channel": channel, "baud": baud, "frames": [], "bytes": 0}
+    bit_us = 1_000_000 / baud
+    decoded = []
+    busy_until = -1.0
+    falling_edges = 0
+    framing_errors = 0
+    for previous, current in zip(data, data[1:]):
+        start = current.us
+        if start < busy_until:
+            continue
+        previous_level = (previous.bits >> channel) & 1
+        current_level = (current.bits >> channel) & 1
+        if previous_level != 1 or current_level != 0:
+            continue
+        falling_edges += 1
+        if level_at(data, start + 0.5 * bit_us, channel) != 0:
+            framing_errors += 1
+            continue
+        value = sum(
+            level_at(data, start + (1.5 + index) * bit_us, channel) << index
+            for index in range(8)
+        )
+        if level_at(data, start + 9.5 * bit_us, channel) != 1:
+            framing_errors += 1
+            continue
+        decoded.append((start, value))
+        busy_until = start + 9.8 * bit_us
+
+    groups = []
+    current_group = []
+    # Dentro de um quadro os bytes podem ter pequenos intervalos adicionais;
+    # uma pausa de 25 bits ainda fica bem abaixo dos gaps de requisição/resposta.
+    gap_us = 25 * bit_us
+    for item in decoded:
+        if current_group and item[0] - current_group[-1][0] > gap_us:
+            groups.append(current_group)
+            current_group = []
+        current_group.append(item)
+    if current_group:
+        groups.append(current_group)
+
+    signatures = {}
+    frames = []
+    for number, group in enumerate(groups, 1):
+        values = [value for _stamp, value in group]
+        signature = bytes(values).hex()
+        if signature not in signatures:
+            signatures[signature] = {
+                "label": chr(65 + len(signatures)) if len(signatures) < 26 else f"P{len(signatures) + 1}",
+                "count": 0,
+            }
+        signatures[signature]["count"] += 1
+        numeric = []
+        for offset in range(max(0, len(values) - 1)):
+            little = values[offset] | (values[offset + 1] << 8)
+            big = (values[offset] << 8) | values[offset + 1]
+            signed_little = little - 65536 if little >= 32768 else little
+            numeric.append({
+                "offset": offset,
+                "u16le": little,
+                "s16le": signed_little,
+                "u16be": big,
+            })
+        checksum = {
+            "sum8_zero": bool(values) and sum(values) & 0xFF == 0,
+            "sum8_ff": len(values) > 1 and sum(values) & 0xFF == 0xFF,
+            "xor_zero": bool(values) and (
+                functools.reduce(lambda left, right: left ^ right, values, 0) == 0
+            ),
+            "crc16_modbus": len(values) > 2 and _crc16_modbus(values[:-2]) in (
+                values[-2] | (values[-1] << 8),
+                (values[-2] << 8) | values[-1],
+            ),
+            "crc16_kermit": len(values) > 2 and _crc16_kermit(values[:-2]) in (
+                values[-2] | (values[-1] << 8),
+                (values[-2] << 8) | values[-1],
+            ),
+        }
+        frames.append({
+            "number": number,
+            "start_us": group[0][0],
+            "end_us": group[-1][0] + 10 * bit_us,
+            "values": values,
+            "hex": " ".join(f"{value:02X}" for value in values),
+            "decimal": " ".join(str(value) for value in values),
+            "ascii": "".join(chr(value) if 32 <= value <= 126 else "." for value in values),
+            "numeric": numeric,
+            "checksum": checksum,
+            "signature": signature,
+        })
+    for frame in frames:
+        group = signatures[frame["signature"]]
+        frame["pattern"] = group["label"]
+        frame["repeat_count"] = group["count"]
+        del frame["signature"]
+    confidence = len(decoded) / max(1, len(decoded) + framing_errors)
+    return {
+        "channel": channel,
+        "wire": "AB"[channel],
+        "baud": baud,
+        "bit_us": bit_us,
+        "format": "8N1",
+        "confidence": confidence,
+        "falling_edges": falling_edges,
+        "framing_errors": framing_errors,
+        "bytes": len(decoded),
+        "unique_patterns": len(signatures),
+        "frames": frames,
+    }
+
+
+def decode_uart_duplex(data: list[Sample], baud: int = 57600) -> dict:
+    channels = [decode_uart(data, channel, baud) for channel in (0, 1)]
+    events = sorted(
+        [
+            {**frame, "wire": channel["wire"]}
+            for channel in channels
+            for frame in channel["frames"]
+        ],
+        key=lambda frame: frame["start_us"],
+    )
+    return {"baud": baud, "format": "8N1", "channels": channels, "events": events}
 
 
 def decode_proprietary(data: list[Sample]):
