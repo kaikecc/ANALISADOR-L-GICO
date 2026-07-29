@@ -6,7 +6,7 @@
   <title>LogicLab — Controle Altazimutal</title>
   <style>
     :root{--bg:#0d1015;--panel:#171b22;--panel2:#202630;--line:#343c49;--text:#eef2f7;--muted:#9da9b8;--blue:#72aaff;--cyan:#5be0e6;--green:#75d69c;--red:#ff746d;--amber:#ffc665}
-    *{box-sizing:border-box}html,body{margin:0;min-width:1180px;height:100%;background:radial-gradient(circle at 50% -30%,#233451 0,var(--bg) 45%);color:var(--text);font:14px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+    *{box-sizing:border-box}html,body{margin:0;min-width:900px;height:100%;background:radial-gradient(circle at 50% -30%,#233451 0,var(--bg) 45%);color:var(--text);font:14px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
     body{display:flex;flex-direction:column;overflow:hidden}button,select,input{font:inherit}
     header{display:flex;align-items:center;gap:20px;padding:13px 20px;background:#12161dcc;border-bottom:1px solid var(--line);backdrop-filter:blur(18px)}
     .brand{min-width:235px}.brand h1{margin:0;font-size:21px;letter-spacing:-.5px}.brand small{color:var(--muted)}
@@ -16,7 +16,7 @@
     .primary{background:var(--blue);color:#09244b;border:0}.connection-dot{width:9px;height:9px;border-radius:50%;background:#647080;box-shadow:0 0 0 5px #64708022}.connection-dot.on{background:var(--green);box-shadow:0 0 0 5px #75d69c22}
     .emergency{height:48px;border:0;border-radius:12px;padding:0 22px;background:var(--red);color:#390300;font-weight:900;letter-spacing:.6px;box-shadow:0 5px 24px #ff746d33;cursor:pointer}.emergency:active{transform:translateY(1px)}
     #status{padding:8px 22px;border-bottom:1px solid var(--line);background:#151a21;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.ok{color:var(--green)!important}.error{color:var(--red)!important}
-    main{position:relative;display:grid;grid-template-columns:minmax(390px,1fr) 280px minmax(390px,1fr);grid-template-rows:minmax(410px,1fr) 175px;gap:14px;padding:14px;min-height:0;flex:1}
+    main{position:relative;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:minmax(410px,1fr) 175px;gap:14px;padding:14px;min-height:0;flex:1}
     .axis-card,.log-card{background:linear-gradient(145deg,#1b2029,#141820);border:1px solid var(--line);border-radius:18px;box-shadow:0 12px 40px #0004;overflow:hidden}
     .axis-card{display:grid;grid-template-rows:auto 1fr auto;padding:18px}.axis-head{display:flex;align-items:center}.axis-head h2{margin:0;font-size:18px}.axis-head span{margin-left:auto;color:var(--muted);font-size:12px}
     .instrument{display:grid;grid-template-columns:minmax(180px,1fr) minmax(170px,.8fr);align-items:center;gap:14px;min-height:0}
@@ -27,12 +27,12 @@
     .manual{display:grid;grid-template-columns:minmax(0,1fr) 90px minmax(0,1fr);gap:8px;align-items:end}.hold{height:50px;border:1px solid var(--line);border-radius:12px;background:#252c37;color:var(--text);font-size:16px;font-weight:800;cursor:pointer;user-select:none;touch-action:none}.hold:hover{border-color:var(--cyan);background:#273642}.hold:active,.hold.active{background:var(--cyan);color:#072e32}.speed{width:90px}
     .goto{display:grid;grid-template-columns:minmax(100px,1fr) auto auto;gap:8px;margin-top:12px;min-width:0}.goto input{width:100%;min-width:0}.goto .btn{border-radius:10px;padding:0 13px}.stop-axis{color:var(--red)!important}
     .limit-lock{display:grid;grid-template-columns:minmax(90px,1fr) auto auto;gap:7px 9px;align-items:center;padding:9px 10px;border:1px solid #ffc66555;border-radius:12px;background:#ffc6650b;min-width:0}.limit-lock strong{color:var(--amber);font-size:11px}.limit-lock label.toggle{display:flex;align-items:center;gap:5px;color:var(--text);font-size:11px}.limit-lock input[type=checkbox]{width:17px;height:17px;accent-color:var(--amber)}.limit-lock input[type=number]{width:100%;min-width:0}.limit-lock .field{min-width:0}.limit-lock #applyLimits{grid-column:3;grid-row:1/3;height:100%;padding:0 10px}
-    .axis-card[data-axis="AZ"]{grid-column:1;grid-row:1}.axis-card[data-axis="ALT"]{grid-column:3;grid-row:1}.mount-visual{grid-column:2;grid-row:1;align-self:stretch;justify-self:stretch;width:100%;height:auto;padding:14px 10px;border:1px solid var(--line);border-radius:18px;background:linear-gradient(145deg,#1b2029,#141820);box-shadow:0 12px 40px #0004;pointer-events:none;display:grid;grid-template-rows:auto minmax(0,1fr) auto auto}.mount-title{text-align:center;color:var(--muted);font-size:10px;letter-spacing:.7px}.mount-title strong{display:block;color:var(--text);font-size:12px;margin-bottom:2px}#telescope3d{display:block;align-self:center;width:258px;height:270px}.mount-readout{display:flex;justify-content:center;gap:16px;color:var(--muted);font:10px ui-monospace,monospace}.mount-readout b{color:var(--text);font-size:12px}.mount-cal{text-align:center;margin-top:5px;color:var(--muted);font-size:9px}.mount-cal.ready{color:var(--green)}
-    .log-card{grid-column:1/4;grid-row:2;display:grid;grid-template-columns:360px minmax(430px,1fr) minmax(260px,.65fr)}.telemetry-side{border-right:1px solid var(--line);display:grid;grid-template-columns:1.3fr 1fr}.bno-panel{padding:13px 16px;border-right:1px solid var(--line)}.bno-panel strong{display:block;color:var(--cyan);margin-bottom:9px}.bno-values{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.bno-value span{display:block;color:var(--muted);font-size:9px}.bno-value b{font:600 17px ui-monospace,monospace}.calibration{margin-top:9px;color:var(--muted);font-size:10px}.calibration i{display:inline-grid;place-items:center;width:20px;height:20px;margin-left:3px;border-radius:50%;background:#343c49;color:var(--text);font-style:normal}.calibration i.good{background:var(--green);color:#092b17}.safety{padding:13px 14px}.safety strong{display:block;color:var(--amber);margin-bottom:7px}.safety p{margin:0;color:var(--muted);font-size:11px;line-height:1.4}.chart-panel{min-width:0;padding:10px 12px;border-right:1px solid var(--line);display:grid;grid-template-rows:auto 1fr}.chart-head{display:flex;align-items:center;gap:13px;color:var(--muted);font-size:10px}.chart-head strong{color:var(--text);font-size:12px;margin-right:auto}.legend{display:inline-flex;align-items:center;gap:4px}.legend::before{content:"";width:12px;height:3px;border-radius:2px;background:var(--series)}.heading-line{--series:var(--cyan)}.roll-line{--series:var(--magenta)}.pitch-line{--series:var(--amber)}#bnoChart{display:block;width:100%;height:120px;min-width:0}
+    .axis-card[data-axis="AZ"]{grid-column:1;grid-row:1}.axis-card[data-axis="ALT"]{grid-column:2;grid-row:1}
+    .log-card{grid-column:1/3;grid-row:2;display:grid;grid-template-columns:360px minmax(430px,1fr) minmax(260px,.65fr)}.telemetry-side{border-right:1px solid var(--line);display:grid;grid-template-columns:1.3fr 1fr}.bno-panel{padding:13px 16px;border-right:1px solid var(--line)}.bno-panel strong{display:block;color:var(--cyan);margin-bottom:9px}.bno-values{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.bno-value span{display:block;color:var(--muted);font-size:9px}.bno-value b{font:600 17px ui-monospace,monospace}.calibration{margin-top:9px;color:var(--muted);font-size:10px}.calibration i{display:inline-grid;place-items:center;width:20px;height:20px;margin-left:3px;border-radius:50%;background:#343c49;color:var(--text);font-style:normal}.calibration i.good{background:var(--green);color:#092b17}.safety{padding:13px 14px}.safety strong{display:block;color:var(--amber);margin-bottom:7px}.safety p{margin:0;color:var(--muted);font-size:11px;line-height:1.4}.chart-panel{min-width:0;padding:10px 12px;border-right:1px solid var(--line);display:grid;grid-template-rows:auto 1fr}.chart-head{display:flex;align-items:center;gap:13px;color:var(--muted);font-size:10px}.chart-head strong{color:var(--text);font-size:12px;margin-right:auto}.legend{display:inline-flex;align-items:center;gap:4px}.legend::before{content:"";width:12px;height:3px;border-radius:2px;background:var(--series)}.heading-line{--series:var(--cyan)}.roll-line{--series:var(--magenta)}.pitch-line{--series:var(--amber)}#bnoChart{display:block;width:100%;height:120px;min-width:0}
     .bno-panel strong.stale{color:var(--red)}
     #log{margin:0;padding:13px 18px;overflow:auto;list-style:none;font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace}#log li{color:#aeb8c5}#log time{color:#697787;margin-right:10px}#log .error{color:var(--red)}#log .ok{color:var(--green)}
     @media(max-width:1250px){.log-card{grid-template-columns:320px minmax(360px,1fr)}#log{display:none}.telemetry-side{grid-template-columns:1fr}.safety{display:none}.bno-panel{border-right:0}}
-    @media(max-height:760px){main{grid-template-rows:minmax(360px,1fr) 150px}.axis-card{padding:13px}.dial{width:220px;height:220px}#telescope3d{height:220px}.angle{font-size:34px}.log-card{grid-template-columns:300px 1fr}#bnoChart{height:100px}}
+    @media(max-height:760px){main{grid-template-rows:minmax(360px,1fr) 150px}.axis-card{padding:13px}.dial{width:220px;height:220px}.angle{font-size:34px}.log-card{grid-template-columns:300px 1fr}#bnoChart{height:100px}}
   </style>
 </head>
 <body>
@@ -44,7 +44,6 @@
   </header>
   <div id="status">Inicializando interface…</div>
   <main>
-    <div class="mount-visual" id="mountVisual"><div class="mount-title"><strong>TELESCÓPIO 3D</strong>posição fornecida pela montagem</div><canvas id="telescope3d" aria-label="Modelo tridimensional animado do telescópio altazimutal"></canvas><div class="mount-readout"><span>AZ <b id="modelAz">---°</b></span><span>ALT <b id="modelEl">---°</b></span></div><div class="mount-cal" id="modelCal">aguardando posição</div></div>
     <section class="axis-card" data-axis="AZ">
       <div class="axis-head"><h2>Azimute</h2><span>rotação horizontal • 0–360°</span></div>
       <div class="instrument">
@@ -70,7 +69,6 @@
     const manualStates=new Map();
     const bnoHistory=[];
     let lastBnoSample=0;
-    const telescopePose={heading:0,pitch:0,roll:0,targetHeading:0,targetPitch:0,targetRoll:0,frame:0};
     function show(message,type=''){status.textContent=message;status.className=type}
     async function call(method,args=[]){try{return await window.pywebview.api[method](...args)}catch(error){show(error.message||String(error),'error');return{ok:false,message:error.message||String(error)}}}
     async function refreshPorts(){
@@ -164,59 +162,6 @@
         drawBnoChart();
       }
     }
-    function updateMountAnimation(position){
-      if(!Number.isFinite(position?.az)||!Number.isFinite(position?.alt)){
-        drawTelescope3d();
-        return;
-      }
-      const heading=((position.az%360)+360)%360;
-      const signedAltitude=(position.alt+180)%360-180;
-      const elevation=Math.max(-90,Math.min(90,signedAltitude));
-      telescopePose.targetHeading=heading;telescopePose.targetPitch=elevation;telescopePose.targetRoll=0;
-      if(!telescopePose.frame)telescopePose.frame=requestAnimationFrame(animateTelescope3d);
-      $('#modelAz').textContent=`${heading.toFixed(1)}°`;$('#modelEl').textContent=`${position.alt.toFixed(1)}°`;
-      const label=$('#modelCal');label.textContent='posição dos encoders';label.classList.add('ready');
-    }
-    function animateTelescope3d(){
-      telescopePose.frame=0;
-      let headingError=(telescopePose.targetHeading-telescopePose.heading+540)%360-180;
-      telescopePose.heading=(telescopePose.heading+headingError*.16+360)%360;
-      telescopePose.pitch+=(telescopePose.targetPitch-telescopePose.pitch)*.16;
-      telescopePose.roll+=(telescopePose.targetRoll-telescopePose.roll)*.16;
-      drawTelescope3d();
-      if(Math.abs(headingError)>.05||Math.abs(telescopePose.targetPitch-telescopePose.pitch)>.05||Math.abs(telescopePose.targetRoll-telescopePose.roll)>.05)telescopePose.frame=requestAnimationFrame(animateTelescope3d);
-    }
-    function drawTelescope3d(){
-      const canvas=$('#telescope3d'),rect=canvas.getBoundingClientRect(),dpr=devicePixelRatio||1;
-      if(rect.width<20||rect.height<20)return;
-      if(canvas.width!==Math.round(rect.width*dpr)||canvas.height!==Math.round(rect.height*dpr)){canvas.width=Math.round(rect.width*dpr);canvas.height=Math.round(rect.height*dpr)}
-      const ctx=canvas.getContext('2d');ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,rect.width,rect.height);
-      const rad=Math.PI/180,yaw=telescopePose.heading*rad,pitch=-telescopePose.pitch*rad,roll=telescopePose.roll*rad;
-      const rotate=(p,full=true)=>{
-        let [x,y,z]=p;
-        if(full){let y1=y*Math.cos(roll)-z*Math.sin(roll),z1=y*Math.sin(roll)+z*Math.cos(roll);y=y1;z=z1;let x1=x*Math.cos(pitch)+z*Math.sin(pitch),z2=-x*Math.sin(pitch)+z*Math.cos(pitch);x=x1;z=z2}
-        return [x*Math.cos(yaw)-y*Math.sin(yaw),x*Math.sin(yaw)+y*Math.cos(yaw),z];
-      };
-      const project=p=>({x:rect.width/2+(p[0]-p[1])*.72*53,y:rect.height*.68+(p[0]+p[1])*.32*53-p[2]*.78*53,depth:(p[0]+p[1])*.55+p[2]*.15});
-      const path=(points,close=true)=>{ctx.beginPath();points.forEach((point,index)=>{const q=project(point);index?ctx.lineTo(q.x,q.y):ctx.moveTo(q.x,q.y)});if(close)ctx.closePath()};
-      // Base, coluna e garfo da montagem altazimutal.
-      ctx.fillStyle='#57231d';ctx.strokeStyle='#a45a46';ctx.lineWidth=1.2;ctx.beginPath();ctx.ellipse(rect.width/2,rect.height*.82,39,13,0,0,Math.PI*2);ctx.fill();ctx.stroke();
-      ctx.fillStyle='#173d29';ctx.beginPath();ctx.ellipse(rect.width/2,rect.height*.76,31,10,0,0,Math.PI*2);ctx.fill();
-      const pivot=rotate([0,0,1.35],false),pivotScreen=project(pivot);
-      for(const side of [-.48,.48]){const bottom=project(rotate([0,side,.15],false)),top=project(rotate([0,side,1.35],false));ctx.strokeStyle='#28633e';ctx.lineWidth=13;ctx.lineCap='round';ctx.beginPath();ctx.moveTo(bottom.x,bottom.y);ctx.lineTo(top.x,top.y);ctx.stroke();ctx.strokeStyle='#62a879';ctx.lineWidth=2;ctx.stroke()}
-      // Tubo cilíndrico com faces ordenadas por profundidade.
-      const segments=18,faces=[];
-      for(let index=0;index<segments;index++){const a=index/segments*Math.PI*2,b=(index+1)/segments*Math.PI*2;const local=[[-1.35,Math.cos(a)*.39,Math.sin(a)*.39],[1.35,Math.cos(a)*.39,Math.sin(a)*.39],[1.35,Math.cos(b)*.39,Math.sin(b)*.39],[-1.35,Math.cos(b)*.39,Math.sin(b)*.39]];const points=local.map(p=>{const r=rotate(p);return[r[0]+pivot[0],r[1]+pivot[1],r[2]+pivot[2]]});faces.push({points,depth:points.reduce((sum,p)=>sum+project(p).depth,0)/4,index})}
-      faces.sort((a,b)=>a.depth-b.depth).forEach(face=>{path(face.points);const light=.55+.3*Math.cos(face.index/segments*Math.PI*2);ctx.fillStyle=`rgb(${Math.round(43*light)},${Math.round(29*light)},${Math.round(78*light)})`;ctx.fill();ctx.strokeStyle='#594a79';ctx.lineWidth=.6;ctx.stroke()});
-      const front=[];for(let index=0;index<segments;index++){const a=index/segments*Math.PI*2,r=rotate([1.35,Math.cos(a)*.39,Math.sin(a)*.39]);front.push([r[0]+pivot[0],r[1]+pivot[1],r[2]+pivot[2]])}path(front);ctx.fillStyle='#090613';ctx.fill();ctx.strokeStyle='#726092';ctx.stroke();
-      // Eixos locais X/Y/Z e eixo vertical global, como na referência.
-      const origin=pivot,axis=(vector,color,label)=>{
-        const r=rotate(vector),end=[origin[0]+r[0],origin[1]+r[1],origin[2]+r[2]],a=project(origin),b=project(end),angle=Math.atan2(b.y-a.y,b.x-a.x);
-        ctx.strokeStyle=color;ctx.fillStyle=color;ctx.lineWidth=2.2;ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke();ctx.beginPath();ctx.moveTo(b.x,b.y);ctx.lineTo(b.x-9*Math.cos(angle-.38),b.y-9*Math.sin(angle-.38));ctx.lineTo(b.x-9*Math.cos(angle+.38),b.y-9*Math.sin(angle+.38));ctx.closePath();ctx.fill();ctx.font='bold 10px sans-serif';ctx.fillText(label,b.x+5,b.y-4);
-      };
-      axis([2.05,0,0],'#ff4a2f','X');axis([0,1.65,0],'#36d164','Y');axis([0,0,1.55],'#00c9e8','Z');
-      const verticalEnd=project([0,0,3.2]),verticalStart=project([0,0,.2]);ctx.strokeStyle='#ef40e8';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(verticalStart.x,verticalStart.y);ctx.lineTo(verticalEnd.x,verticalEnd.y);ctx.stroke();
-    }
     function drawBnoChart(){
       const canvas=$('#bnoChart'),rect=canvas.getBoundingClientRect(),dpr=devicePixelRatio||1;
       if(rect.width<20||rect.height<20)return;
@@ -239,10 +184,7 @@
         ctx.stroke();
       }
     }
-    addEventListener('resize',()=>{drawBnoChart();drawTelescope3d()});
-    // O modelo deve existir visualmente mesmo antes da primeira resposta da
-    // montagem. As posições válidas posteriores apenas alteram sua orientação.
-    requestAnimationFrame(drawTelescope3d);
+    addEventListener('resize',drawBnoChart);
     function appendMessages(messages){
       if(!messages.length)return;if(log.children.length===1&&log.textContent.includes('Aguardando'))log.innerHTML='';
       messages.forEach(item=>{const li=document.createElement('li');li.className=item.level;const time=document.createElement('time');time.textContent=item.time;li.append(time,document.createTextNode(item.text));log.appendChild(li)});
@@ -257,7 +199,7 @@
         if(document.activeElement!==$('#limitMin'))$('#limitMin').value=state.elevation_limits.min;
         if(document.activeElement!==$('#limitMax'))$('#limitMax').value=state.elevation_limits.max;
       }
-      updateAxis('az',state.position.az,state.position.az_counts,state.motion.az);updateAxis('alt',state.position.alt,state.position.alt_counts,state.motion.alt);updateMountAnimation(state.position);appendMessages(state.messages);
+      updateAxis('az',state.position.az,state.position.az_counts,state.motion.az);updateAxis('alt',state.position.alt,state.position.alt_counts,state.motion.alt);appendMessages(state.messages);
       updateBno(state.bno);
       setTimeout(poll,250);
     }

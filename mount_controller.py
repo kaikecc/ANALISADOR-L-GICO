@@ -426,7 +426,7 @@ def main() -> None:
         js_api=api,
         width=1280,
         height=820,
-        min_size=(1180, 680),
+        min_size=(940, 680),
         background_color="#0d1015",
     )
     window.events.closed += api.close

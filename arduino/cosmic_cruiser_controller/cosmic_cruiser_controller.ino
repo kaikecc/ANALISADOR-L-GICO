@@ -23,6 +23,18 @@ constexpr float COUNTS_PER_DEGREE = 4648.0f;
 constexpr uint8_t CONFIRMED_MAX_SPEED = 0x09;
 constexpr uint32_t QUERY_INTERVAL_MS = 250;
 constexpr uint32_t RESPONSE_TIMEOUT_MS = 80;
+constexpr uint8_t MOUNT_TX_PIN = 18;
+constexpr uint16_t STARTUP_TX_LOW_MS = 250;
+constexpr uint16_t STARTUP_IDLE_TO_0D_MS = 1797;
+constexpr uint16_t STARTUP_0D_TO_0B_MS = 2475;
+constexpr uint8_t STARTUP_SHORT_GAP_MS = 12;
+constexpr uint16_t STARTUP_0A_TO_0E_MS = 126;
+constexpr uint16_t STARTUP_0E_TO_STOP_MS = 788;
+constexpr uint8_t STARTUP_DOUBLE_STOP_MS = 6;
+constexpr uint8_t STARTUP_STOP_TO_C0_MS = 18;
+constexpr uint8_t STARTUP_AXIS_CONFIG_MS = 6;
+constexpr uint8_t STARTUP_RESPONSE_TIMEOUT_MS = 100;
+constexpr uint16_t STARTUP_KEEPALIVE_MS = 5079;
 constexpr uint32_t MOTION_TIMEOUT_MS = 240000UL;
 constexpr float DEFAULT_TOLERANCE_DEG = 0.75f;
 constexpr uint32_t BNO_INTERVAL_MS = 200;
@@ -69,9 +81,11 @@ uint8_t activeSpeed = CONFIRMED_MAX_SPEED;
 uint32_t targetCounts = 0;
 uint32_t motionStartedAt = 0;
 uint32_t lastQueryAt = 0;
+uint32_t lastStartupKeepaliveAt = 0;
 uint32_t lastBnoAt = 0;
 uint16_t lastMountRxBytes = 0;
 bool lastMountHadBadCrc = false;
+bool startupSequenceSent = false;
 char consoleLine[80];
 uint8_t consoleLength = 0;
 bool bnoAvailable = false;
@@ -116,6 +130,23 @@ void sendPositionQuery() {
   };
   sendFrame(frame);
   lastQueryAt = millis();
+}
+
+void sendStartupRequest(uint8_t command) {
+  uint8_t frame[FRAME_SIZE] = {
+    0x01, 0x01, 0x00, command,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+  };
+  sendFrame(frame);
+}
+
+void sendStartupElevationReference() {
+  uint8_t frame[FRAME_SIZE] = {
+    0x01, 0x01, 0x00, 0xC1,
+    0xF0, 0x61, 0x06, 0x00,
+    0, 0, 0, 0, 0, 0
+  };
+  sendFrame(frame);
 }
 
 void sendAxisMotion(Axis axis, Direction direction, uint8_t speed) {
@@ -208,6 +239,87 @@ bool readMountFrame(uint8_t frame[FRAME_SIZE], uint32_t timeoutMs) {
     }
   }
   return false;
+}
+
+void waitFrom(uint32_t startedAt, uint32_t intervalMs) {
+  while (millis() - startedAt < intervalMs) delay(1);
+}
+
+bool readStartupResponse(uint8_t expectedCommand, uint32_t timeoutMs) {
+  uint8_t frame[FRAME_SIZE];
+  const uint32_t startedAt = millis();
+  while (millis() - startedAt < timeoutMs) {
+    const uint32_t remaining = timeoutMs - (millis() - startedAt);
+    if (!readMountFrame(frame, remaining)) return false;
+    if (frame[3] == expectedCommand) return true;
+  }
+  return false;
+}
+
+void initializeMountProtocol(uint32_t txIdleStartedAt) {
+  Serial.println(F("MONTAGEM: reproduzindo inicializacao do controle"));
+  waitFrom(txIdleStartedAt, STARTUP_IDLE_TO_0D_MS);
+  while (Serial1.available()) Serial1.read();
+
+  const uint32_t command0DAt = millis();
+  sendStartupRequest(0x0D);
+  waitFrom(command0DAt, STARTUP_0D_TO_0B_MS);
+
+  const uint32_t command0BAt = millis();
+  sendStartupRequest(0x0B);
+  waitFrom(command0BAt, STARTUP_SHORT_GAP_MS);
+
+  const uint32_t first80At = millis();
+  sendAxisStop(AZIMUTH);
+  waitFrom(first80At, STARTUP_SHORT_GAP_MS);
+
+  while (Serial1.available()) Serial1.read();
+  const uint32_t command0AAt = millis();
+  sendStartupRequest(0x0A);
+  const bool response0A =
+    readStartupResponse(0x0A, STARTUP_RESPONSE_TIMEOUT_MS);
+  waitFrom(command0AAt, STARTUP_0A_TO_0E_MS);
+
+  while (Serial1.available()) Serial1.read();
+  const uint32_t command0EAt = millis();
+  sendStartupRequest(0x0E);
+  const bool response0E =
+    readStartupResponse(0x0E, STARTUP_RESPONSE_TIMEOUT_MS);
+  waitFrom(command0EAt, STARTUP_0E_TO_STOP_MS);
+
+  const uint32_t firstStopAt = millis();
+  sendAxisStop(AZIMUTH);
+  waitFrom(firstStopAt, STARTUP_DOUBLE_STOP_MS);
+
+  const uint32_t secondStopAt = millis();
+  sendAxisStop(AZIMUTH);
+  waitFrom(secondStopAt, STARTUP_STOP_TO_C0_MS);
+
+  const uint32_t elevationStopAt = millis();
+  sendAxisStop(ELEVATION);
+  waitFrom(elevationStopAt, STARTUP_AXIS_CONFIG_MS);
+
+  const uint32_t command81At = millis();
+  sendStartupRequest(0x81);
+  waitFrom(command81At, STARTUP_AXIS_CONFIG_MS);
+  sendStartupElevationReference();
+
+  startupSequenceSent = true;
+  lastStartupKeepaliveAt = millis();
+  Serial.print(F("MONTAGEM: 0A "));
+  Serial.print(response0A ? F("OK") : F("SEM RESPOSTA"));
+  Serial.print(F(" | 0E "));
+  Serial.println(response0E ? F("OK") : F("SEM RESPOSTA"));
+  Serial.println(F("MONTAGEM: comandos liberados independentemente das respostas"));
+}
+
+void serviceStartupKeepalive() {
+  if (!startupSequenceSent || motionMode != IDLE) return;
+  if (millis() - lastStartupKeepaliveAt < STARTUP_KEEPALIVE_MS) return;
+  while (Serial1.available()) Serial1.read();
+  lastStartupKeepaliveAt = millis();
+  sendStartupRequest(0x0A);
+  readStartupResponse(0x0A, STARTUP_RESPONSE_TIMEOUT_MS);
 }
 
 void printPositions() {
@@ -567,11 +679,21 @@ void pollConsole() {
 
 void setup() {
   Serial.begin(USB_BAUD);
+
+  // O controle original mantem o fio B baixo durante a entrada em operacao,
+  // depois o leva ao nivel ocioso alto e inicia os quadros 1,797 s mais tarde.
+  pinMode(MOUNT_TX_PIN, OUTPUT);
+  digitalWrite(MOUNT_TX_PIN, LOW);
+  delay(STARTUP_TX_LOW_MS);
+  digitalWrite(MOUNT_TX_PIN, HIGH);
   Serial1.begin(MOUNT_BAUD, SERIAL_8N1);
+  const uint32_t txIdleStartedAt = millis();
+
   Wire.begin();
   Wire.setClock(100000UL);
   motionMode = IDLE;
-  delay(250);
+  initializeMountProtocol(txIdleStartedAt);
+
   bnoAvailable = beginBno();
   if (bnoAvailable) {
     Serial.println(F("BNO055 pronto no I2C 0x28 (registradores diretos)"));
@@ -585,5 +707,6 @@ void setup() {
 void loop() {
   pollConsole();
   serviceMotion();
+  serviceStartupKeepalive();
   serviceBno();
 }
