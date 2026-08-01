@@ -45,6 +45,35 @@ por segundo. Um nível `3` indica calibração completa daquele componente.
 O USB permanece conectado ao computador para receber comandos a 115.200 baud.
 A comunicação com a montagem usa `Serial1` a 57.600 baud, 8N1.
 
+## Relógio DS3231 / HW-84
+
+O RTC compartilha o barramento I²C com o BNO055:
+
+| DS3231 HW-84 | Arduino Mega |
+|---|---|
+| VCC | 5 V |
+| GND | GND |
+| SDA | D20 / SDA |
+| SCL | D21 / SCL |
+
+O endereço é `0x68`. Ao conectar pela interface, o RTC é acertado
+automaticamente com o horário UTC do computador. Os comandos de diagnóstico
+são `RTC` e `RTC SET AAAA MM DD HH MM SS`; o segundo sempre recebe UTC.
+
+## Rastreamento da Lua
+
+A interface está configurada para `27,085263° S, 48,919816° O`. Para iniciar:
+
+1. Conecte e confirme que RTC, posição e BNO055 aparecem na interface.
+2. Use os controles manuais para centralizar a Lua no telescópio.
+3. Com os motores parados, clique em **Alinhar na Lua**.
+4. Clique em **Rastrear Lua**.
+
+O alinhamento calcula os offsets entre as coordenadas celestes e os encoders.
+O rastreamento corrige um eixo por vez a cada cinco segundos. **Parar** ou a
+parada de emergência interrompem o rastreamento e os dois motores. A Lua abaixo
+do horizonte, fora da trava de elevação ou a perda do RTC também causam parada.
+
 ## Comandos
 
 Abra o Monitor Serial em 115.200 baud com final de linha habilitado:

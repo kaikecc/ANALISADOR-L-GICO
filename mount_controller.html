@@ -16,6 +16,7 @@
     .primary{background:var(--blue);color:#09244b;border:0}.connection-dot{width:9px;height:9px;border-radius:50%;background:#647080;box-shadow:0 0 0 5px #64708022}.connection-dot.on{background:var(--green);box-shadow:0 0 0 5px #75d69c22}
     .emergency{height:48px;border:0;border-radius:12px;padding:0 22px;background:var(--red);color:#390300;font-weight:900;letter-spacing:.6px;box-shadow:0 5px 24px #ff746d33;cursor:pointer}.emergency:active{transform:translateY(1px)}
     #status{padding:8px 22px;border-bottom:1px solid var(--line);background:#151a21;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.ok{color:var(--green)!important}.error{color:var(--red)!important}
+    .moonbar{display:flex;align-items:center;gap:14px;padding:9px 20px;border-bottom:1px solid var(--line);background:#111721}.moon-title{font-weight:900;color:var(--cyan)}.moon-data{display:flex;gap:15px;flex:1;color:var(--muted);font:12px ui-monospace,monospace}.moon-data b{color:var(--text)}.moonbar .btn{height:34px;border-radius:9px}.moonbar select{height:34px;width:65px}.tracking{color:var(--green)!important}
     main{position:relative;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:minmax(410px,1fr) 175px;gap:14px;padding:14px;min-height:0;flex:1}
     .axis-card,.log-card{background:linear-gradient(145deg,#1b2029,#141820);border:1px solid var(--line);border-radius:18px;box-shadow:0 12px 40px #0004;overflow:hidden}
     .axis-card{display:grid;grid-template-rows:auto 1fr auto;padding:18px}.axis-head{display:flex;align-items:center}.axis-head h2{margin:0;font-size:18px}.axis-head span{margin-left:auto;color:var(--muted);font-size:12px}
@@ -43,6 +44,20 @@
     <button class="emergency" id="emergency">■ PARADA DE EMERGÊNCIA</button>
   </header>
   <div id="status">Inicializando interface…</div>
+  <section class="moonbar">
+    <span class="moon-title">☾ LUA</span>
+    <div class="moon-data">
+      <span>LOCAL <b>27,085263° S · 48,919816° O</b></span>
+      <span>RTC <b id="rtcTime">---</b></span>
+      <span>ALVO <b id="moonTarget">AZ --- · ALT ---</b></span>
+      <span>ERRO <b id="moonError">---</b></span>
+      <span id="moonState">não alinhado</span>
+    </div>
+    <label class="field"><span>VELOC.</span><select id="moonSpeed"><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option>8</option><option selected>9</option></select></label>
+    <button class="btn" id="alignMoon">Alinhar na Lua</button>
+    <button class="btn primary" id="trackMoon">Rastrear Lua</button>
+    <button class="btn stop-axis" id="stopMoon">Parar</button>
+  </section>
   <main>
     <section class="axis-card" data-axis="AZ">
       <div class="axis-head"><h2>Azimute</h2><span>rotação horizontal • 0–360°</span></div>
@@ -89,6 +104,9 @@
       $$('#query,.hold,.goto-btn,.stop-axis').forEach(el=>el.disabled=!connected);
     }
     $('#query').onclick=async()=>{const r=await call('query');show(r.message,r.ok?'ok':'error')};
+    $('#alignMoon').onclick=async()=>{const r=await call('align_moon');show(r.message,r.ok?'ok':'error')};
+    $('#trackMoon').onclick=async()=>{const r=await call('start_moon_tracking',[Number($('#moonSpeed').value)]);show(r.message,r.ok?'ok':'error')};
+    $('#stopMoon').onclick=async()=>{const r=await call('stop_moon_tracking');show(r.message,r.ok?'ok':'error')};
     $('#emergency').onclick=async()=>{
       manualStates.forEach(manual=>{manual.pressed=false;manual.button=null});$$('.hold').forEach(b=>b.classList.remove('active'));
       await Promise.all([...manualStates.values()].map(manual=>manual.queue));
@@ -201,6 +219,13 @@
       }
       updateAxis('az',state.position.az,state.position.az_counts,state.motion.az);updateAxis('alt',state.position.alt,state.position.alt_counts,state.motion.alt);appendMessages(state.messages);
       updateBno(state.bno);
+      const rtc=state.rtc||{},moon=state.moon||{},fmt=n=>Number.isFinite(n)?`${Number(n).toFixed(2)}°`:'---';
+      $('#rtcTime').textContent=rtc.valid&&rtc.utc?rtc.utc.replace('T',' ').replace(/\.\d+Z$/,'Z'):'inválido';
+      $('#moonTarget').textContent=`AZ ${fmt(moon.target_az??moon.az)} · ALT ${fmt(moon.target_alt??moon.alt)}`;
+      $('#moonError').textContent=`AZ ${fmt(moon.error_az)} · ALT ${fmt(moon.error_alt)}`;
+      $('#moonState').textContent=moon.tracking?'RASTREANDO':moon.aligned?(moon.status||'alinhado'):'não alinhado';
+      $('#moonState').classList.toggle('tracking',!!moon.tracking);
+      $('#alignMoon').disabled=!connected||!!moon.tracking;$('#trackMoon').disabled=!connected||!!moon.tracking;$('#stopMoon').disabled=!connected||!moon.tracking;
       setTimeout(poll,250);
     }
     addEventListener('pywebviewready',async()=>{await refreshPorts();renderConnection();poll()});

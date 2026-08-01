@@ -50,6 +50,7 @@ constexpr uint8_t BNO_SYS_TRIGGER_REG = 0x3F;
 constexpr uint8_t BNO_PAGE_ID_REG = 0x07;
 constexpr uint8_t BNO_MODE_CONFIG = 0x00;
 constexpr uint8_t BNO_MODE_NDOF = 0x0C;
+constexpr uint8_t RTC_ADDRESS = 0x68;
 
 enum Axis : uint8_t {
   AZIMUTH,
@@ -90,6 +91,7 @@ char consoleLine[80];
 uint8_t consoleLength = 0;
 bool bnoAvailable = false;
 uint8_t bnoReadFailures = 0;
+bool rtcAvailable = false;
 
 const __FlashStringHelper *axisName(Axis axis) {
   return axis == AZIMUTH ? F("AZIMUTE") : F("ELEVACAO");
@@ -320,6 +322,98 @@ void serviceStartupKeepalive() {
   lastStartupKeepaliveAt = millis();
   sendStartupRequest(0x0A);
   readStartupResponse(0x0A, STARTUP_RESPONSE_TIMEOUT_MS);
+}
+
+uint8_t bcdToBinary(uint8_t value) {
+  return value - 6 * (value >> 4);
+}
+
+uint8_t binaryToBcd(uint8_t value) {
+  return value + 6 * (value / 10);
+}
+
+bool rtcReadRegisters(uint8_t reg, uint8_t *data, uint8_t length) {
+  Wire.beginTransmission(RTC_ADDRESS);
+  Wire.write(reg);
+  if (Wire.endTransmission(false) != 0) return false;
+  if (Wire.requestFrom(RTC_ADDRESS, length) != length) {
+    while (Wire.available()) Wire.read();
+    return false;
+  }
+  for (uint8_t index = 0; index < length; ++index) {
+    data[index] = Wire.read();
+  }
+  return true;
+}
+
+bool rtcWriteUtc(
+  uint16_t year, uint8_t month, uint8_t day,
+  uint8_t hour, uint8_t minute, uint8_t second
+) {
+  if (year < 2000 || year > 2099 || month < 1 || month > 12 ||
+      day < 1 || day > 31 || hour > 23 || minute > 59 || second > 59) {
+    return false;
+  }
+  Wire.beginTransmission(RTC_ADDRESS);
+  Wire.write(0x00);
+  Wire.write(binaryToBcd(second));
+  Wire.write(binaryToBcd(minute));
+  Wire.write(binaryToBcd(hour));
+  Wire.write(binaryToBcd(1));  // Dia da semana nao e usado.
+  Wire.write(binaryToBcd(day));
+  Wire.write(binaryToBcd(month));
+  Wire.write(binaryToBcd(year - 2000));
+  if (Wire.endTransmission() != 0) return false;
+
+  // Limpe OSF (Oscillator Stop Flag) depois de acertar o relogio.
+  uint8_t status = 0;
+  if (rtcReadRegisters(0x0F, &status, 1)) {
+    Wire.beginTransmission(RTC_ADDRESS);
+    Wire.write(0x0F);
+    Wire.write(status & ~0x80);
+    Wire.endTransmission();
+  }
+  rtcAvailable = true;
+  return true;
+}
+
+bool printRtcUtc() {
+  uint8_t data[7];
+  uint8_t status = 0;
+  if (!rtcReadRegisters(0x00, data, sizeof(data)) ||
+      !rtcReadRegisters(0x0F, &status, 1)) {
+    rtcAvailable = false;
+    Serial.println(F("RTC: INDISPONIVEL"));
+    return false;
+  }
+  const uint8_t second = bcdToBinary(data[0] & 0x7F);
+  const uint8_t minute = bcdToBinary(data[1] & 0x7F);
+  const uint8_t hour = bcdToBinary(data[2] & 0x3F);
+  const uint8_t day = bcdToBinary(data[4] & 0x3F);
+  const uint8_t month = bcdToBinary(data[5] & 0x1F);
+  const uint16_t year = 2000 + bcdToBinary(data[6]);
+  rtcAvailable = true;
+
+  Serial.print(F("RTC UTC: "));
+  Serial.print(year);
+  Serial.print('-');
+  if (month < 10) Serial.print('0');
+  Serial.print(month);
+  Serial.print('-');
+  if (day < 10) Serial.print('0');
+  Serial.print(day);
+  Serial.print('T');
+  if (hour < 10) Serial.print('0');
+  Serial.print(hour);
+  Serial.print(':');
+  if (minute < 10) Serial.print('0');
+  Serial.print(minute);
+  Serial.print(':');
+  if (second < 10) Serial.print('0');
+  Serial.print(second);
+  Serial.print(F("Z OSF="));
+  Serial.println((status & 0x80) ? 1 : 0);
+  return (status & 0x80) == 0;
 }
 
 void printPositions() {
@@ -568,6 +662,8 @@ void printHelp() {
   Serial.println(F("Comandos:"));
   Serial.println(F("  QUERY"));
   Serial.println(F("  BNO"));
+  Serial.println(F("  RTC"));
+  Serial.println(F("  RTC SET <AAAA> <MM> <DD> <HH> <MM> <SS>  (UTC)"));
   Serial.println(F("  AZ POS [1-9]       | AZ NEG [1-9]"));
   Serial.println(F("  ALT POS [1-9]      | ALT NEG [1-9]"));
   Serial.println(F("  AZ GOTO <graus> [1-9]"));
@@ -608,6 +704,30 @@ void executeConsoleCommand() {
     printBnoOrientation();
   } else if (strcmp(first, "BNO") == 0) {
     printBnoOrientation();
+  } else if (strcmp(first, "RTC") == 0) {
+    char *action = strtok_r(nullptr, " ", &save);
+    if (!action) {
+      printRtcUtc();
+    } else if (strcmp(action, "SET") == 0) {
+      char *fields[6];
+      bool complete = true;
+      for (uint8_t index = 0; index < 6; ++index) {
+        fields[index] = strtok_r(nullptr, " ", &save);
+        if (!fields[index]) complete = false;
+      }
+      if (!complete) {
+        Serial.println(F("ERRO: RTC SET AAAA MM DD HH MM SS"));
+      } else if (rtcWriteUtc(
+                   atoi(fields[0]), atoi(fields[1]), atoi(fields[2]),
+                   atoi(fields[3]), atoi(fields[4]), atoi(fields[5]))) {
+        Serial.println(F("RTC: AJUSTADO EM UTC"));
+        printRtcUtc();
+      } else {
+        Serial.println(F("ERRO: falha ao ajustar RTC"));
+      }
+    } else {
+      Serial.println(F("ERRO: use RTC ou RTC SET AAAA MM DD HH MM SS"));
+    }
   } else if (strcmp(first, "HELP") == 0) {
     printHelp();
   } else {
@@ -691,6 +811,7 @@ void setup() {
 
   Wire.begin();
   Wire.setClock(100000UL);
+  rtcAvailable = printRtcUtc();
   motionMode = IDLE;
   initializeMountProtocol(txIdleStartedAt);
 
