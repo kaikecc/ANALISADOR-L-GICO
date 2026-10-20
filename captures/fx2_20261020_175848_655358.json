@@ -1,0 +1,15 @@
+{
+  "driver": "fx2lafw:conn=1.6",
+  "samplerate_hz": 1000000,
+  "requested_seconds": 300.0,
+  "numchannels": 8,
+  "unitsize": 1,
+  "channel_a": 6,
+  "channel_b": 7,
+  "raw": "fx2_20261020_175848_655358.bin",
+  "csv": "C:\\Users\\kaike\\Desktop\\ANALISADOR-L-GICO\\captures\\usb_20261020_175848_652531.csv",
+  "status": "partial",
+  "conversion_cancelled": true,
+  "raw_samples": 9994240,
+  "converted_states_in_memory": 1
+}

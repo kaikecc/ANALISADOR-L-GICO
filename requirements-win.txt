@@ -1,0 +1,2 @@
+pyserial>=3.5
+pywebview==6.2.1

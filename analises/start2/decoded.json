@@ -1,0 +1,688 @@
+{
+  "baud": 57600,
+  "format": "8N1",
+  "channels": [
+    {
+      "channel": 0,
+      "wire": "A",
+      "baud": 57600,
+      "bit_us": 17.36111111111111,
+      "format": "8N1",
+      "confidence": 1.0,
+      "falling_edges": 40,
+      "framing_errors": 0,
+      "bytes": 40,
+      "unique_patterns": 3,
+      "frames": [
+        {
+          "number": 1,
+          "start_us": 8956717,
+          "end_us": 8959146.611111112,
+          "values": [
+            1,
+            1,
+            0,
+            10,
+            0,
+            0,
+            0,
+            0,
+            231,
+            135,
+            25,
+            0,
+            63,
+            21
+          ],
+          "hex": "01 01 00 0A 00 00 00 00 E7 87 19 00 3F 15",
+          "decimal": "1 1 0 10 0 0 0 0 231 135 25 0 63 21",
+          "ascii": "............?.",
+          "numeric": [
+            {
+              "offset": 0,
+              "u16le": 257,
+              "s16le": 257,
+              "u16be": 257
+            },
+            {
+              "offset": 1,
+              "u16le": 1,
+              "s16le": 1,
+              "u16be": 256
+            },
+            {
+              "offset": 2,
+              "u16le": 2560,
+              "s16le": 2560,
+              "u16be": 10
+            },
+            {
+              "offset": 3,
+              "u16le": 10,
+              "s16le": 10,
+              "u16be": 2560
+            },
+            {
+              "offset": 4,
+              "u16le": 0,
+              "s16le": 0,
+              "u16be": 0
+            },
+            {
+              "offset": 5,
+              "u16le": 0,
+              "s16le": 0,
+              "u16be": 0
+            },
+            {
+              "offset": 6,
+              "u16le": 0,
+              "s16le": 0,
+              "u16be": 0
+            },
+            {
+              "offset": 7,
+              "u16le": 59136,
+              "s16le": -6400,
+              "u16be": 231
+            },
+            {
+              "offset": 8,
+              "u16le": 34791,
+              "s16le": -30745,
+              "u16be": 59271
+            },
+            {
+              "offset": 9,
+              "u16le": 6535,
+              "s16le": 6535,
+              "u16be": 34585
+            },
+            {
+              "offset": 10,
+              "u16le": 25,
+              "s16le": 25,
+              "u16be": 6400
+            },
+            {
+              "offset": 11,
+              "u16le": 16128,
+              "s16le": 16128,
+              "u16be": 63
+            },
+            {
+              "offset": 12,
+              "u16le": 5439,
+              "s16le": 5439,
+              "u16be": 16149
+            }
+          ],
+          "checksum": {
+            "sum8_zero": false,
+            "sum8_ff": false,
+            "xor_zero": false,
+            "crc16_modbus": false,
+            "crc16_kermit": true
+          },
+          "pattern": "A",
+          "repeat_count": 1
+        },
+        {
+          "number": 2,
+          "start_us": 9082667,
+          "end_us": 9085096.611111112,
+          "values": [
+            1,
+            1,
+            0,
+            14,
+            126,
+            13,
+            0,
+            0,
+            190,
+            6,
+            0,
+            0,
+            45,
+            132
+          ],
+          "hex": "01 01 00 0E 7E 0D 00 00 BE 06 00 00 2D 84",
+          "decimal": "1 1 0 14 126 13 0 0 190 6 0 0 45 132",
+          "ascii": "....~.......-.",
+          "numeric": [
+            {
+              "offset": 0,
+              "u16le": 257,
+              "s16le": 257,
+              "u16be": 257
+            },
+            {
+              "offset": 1,
+              "u16le": 1,
+              "s16le": 1,
+              "u16be": 256
+            },
+            {
+              "offset": 2,
+              "u16le": 3584,
+              "s16le": 3584,
+              "u16be": 14
+            },
+            {
+              "offset": 3,
+              "u16le": 32270,
+              "s16le": 32270,
+              "u16be": 3710
+            },
+            {
+              "offset": 4,
+              "u16le": 3454,
+              "s16le": 3454,
+              "u16be": 32269
+            },
+            {
+              "offset": 5,
+              "u16le": 13,
+              "s16le": 13,
+              "u16be": 3328
+            },
+            {
+              "offset": 6,
+              "u16le": 0,
+              "s16le": 0,
+              "u16be": 0
+            },
+            {
+              "offset": 7,
+              "u16le": 48640,
+              "s16le": -16896,
+              "u16be": 190
+            },
+            {
+              "offset": 8,
+              "u16le": 1726,
+              "s16le": 1726,
+              "u16be": 48646
+            },
+            {
+              "offset": 9,
+              "u16le": 6,
+              "s16le": 6,
+              "u16be": 1536
+            },
+            {
+              "offset": 10,
+              "u16le": 0,
+              "s16le": 0,
+              "u16be": 0
+            },
+            {
+              "offset": 11,
+              "u16le": 11520,
+              "s16le": 11520,
+              "u16be": 45
+            },
+            {
+              "offset": 12,
+              "u16le": 33837,
+              "s16le": -31699,
+              "u16be": 11652
+            }
+          ],
+          "checksum": {
+            "sum8_zero": false,
+            "sum8_ff": false,
+            "xor_zero": false,
+            "crc16_modbus": false,
+            "crc16_kermit": true
+          },
+          "pattern": "B",
+          "repeat_count": 1
+        },
+        {
+          "number": 3,
+          "start_us": 14992072,
+          "end_us": 14994500.611111112,
+          "values": [
+            1,
+            1,
+            0,
+            10,
+            0,
+            0,
+            231,
+            135,
+            25,
+            0,
+            63,
+            21
+          ],
+          "hex": "01 01 00 0A 00 00 E7 87 19 00 3F 15",
+          "decimal": "1 1 0 10 0 0 231 135 25 0 63 21",
+          "ascii": "..........?.",
+          "numeric": [
+            {
+              "offset": 0,
+              "u16le": 257,
+              "s16le": 257,
+              "u16be": 257
+            },
+            {
+              "offset": 1,
+              "u16le": 1,
+              "s16le": 1,
+              "u16be": 256
+            },
+            {
+              "offset": 2,
+              "u16le": 2560,
+              "s16le": 2560,
+              "u16be": 10
+            },
+            {
+              "offset": 3,
+              "u16le": 10,
+              "s16le": 10,
+              "u16be": 2560
+            },
+            {
+              "offset": 4,
+              "u16le": 0,
+              "s16le": 0,
+              "u16be": 0
+            },
+            {
+              "offset": 5,
+              "u16le": 59136,
+              "s16le": -6400,
+              "u16be": 231
+            },
+            {
+              "offset": 6,
+              "u16le": 34791,
+              "s16le": -30745,
+              "u16be": 59271
+            },
+            {
+              "offset": 7,
+              "u16le": 6535,
+              "s16le": 6535,
+              "u16be": 34585
+            },
+            {
+              "offset": 8,
+              "u16le": 25,
+              "s16le": 25,
+              "u16be": 6400
+            },
+            {
+              "offset": 9,
+              "u16le": 16128,
+              "s16le": 16128,
+              "u16be": 63
+            },
+            {
+              "offset": 10,
+              "u16le": 5439,
+              "s16le": 5439,
+              "u16be": 16149
+            }
+          ],
+          "checksum": {
+            "sum8_zero": false,
+            "sum8_ff": false,
+            "xor_zero": false,
+            "crc16_modbus": false,
+            "crc16_kermit": false
+          },
+          "pattern": "C",
+          "repeat_count": 1
+        }
+      ]
+    },
+    {
+      "channel": 1,
+      "wire": "B",
+      "baud": 57600,
+      "bit_us": 17.36111111111111,
+      "format": "8N1",
+      "confidence": 0.0,
+      "falling_edges": 0,
+      "framing_errors": 0,
+      "bytes": 0,
+      "unique_patterns": 0,
+      "frames": []
+    }
+  ],
+  "events": [
+    {
+      "number": 1,
+      "start_us": 8956717,
+      "end_us": 8959146.611111112,
+      "values": [
+        1,
+        1,
+        0,
+        10,
+        0,
+        0,
+        0,
+        0,
+        231,
+        135,
+        25,
+        0,
+        63,
+        21
+      ],
+      "hex": "01 01 00 0A 00 00 00 00 E7 87 19 00 3F 15",
+      "decimal": "1 1 0 10 0 0 0 0 231 135 25 0 63 21",
+      "ascii": "............?.",
+      "numeric": [
+        {
+          "offset": 0,
+          "u16le": 257,
+          "s16le": 257,
+          "u16be": 257
+        },
+        {
+          "offset": 1,
+          "u16le": 1,
+          "s16le": 1,
+          "u16be": 256
+        },
+        {
+          "offset": 2,
+          "u16le": 2560,
+          "s16le": 2560,
+          "u16be": 10
+        },
+        {
+          "offset": 3,
+          "u16le": 10,
+          "s16le": 10,
+          "u16be": 2560
+        },
+        {
+          "offset": 4,
+          "u16le": 0,
+          "s16le": 0,
+          "u16be": 0
+        },
+        {
+          "offset": 5,
+          "u16le": 0,
+          "s16le": 0,
+          "u16be": 0
+        },
+        {
+          "offset": 6,
+          "u16le": 0,
+          "s16le": 0,
+          "u16be": 0
+        },
+        {
+          "offset": 7,
+          "u16le": 59136,
+          "s16le": -6400,
+          "u16be": 231
+        },
+        {
+          "offset": 8,
+          "u16le": 34791,
+          "s16le": -30745,
+          "u16be": 59271
+        },
+        {
+          "offset": 9,
+          "u16le": 6535,
+          "s16le": 6535,
+          "u16be": 34585
+        },
+        {
+          "offset": 10,
+          "u16le": 25,
+          "s16le": 25,
+          "u16be": 6400
+        },
+        {
+          "offset": 11,
+          "u16le": 16128,
+          "s16le": 16128,
+          "u16be": 63
+        },
+        {
+          "offset": 12,
+          "u16le": 5439,
+          "s16le": 5439,
+          "u16be": 16149
+        }
+      ],
+      "checksum": {
+        "sum8_zero": false,
+        "sum8_ff": false,
+        "xor_zero": false,
+        "crc16_modbus": false,
+        "crc16_kermit": true
+      },
+      "pattern": "A",
+      "repeat_count": 1,
+      "wire": "A"
+    },
+    {
+      "number": 2,
+      "start_us": 9082667,
+      "end_us": 9085096.611111112,
+      "values": [
+        1,
+        1,
+        0,
+        14,
+        126,
+        13,
+        0,
+        0,
+        190,
+        6,
+        0,
+        0,
+        45,
+        132
+      ],
+      "hex": "01 01 00 0E 7E 0D 00 00 BE 06 00 00 2D 84",
+      "decimal": "1 1 0 14 126 13 0 0 190 6 0 0 45 132",
+      "ascii": "....~.......-.",
+      "numeric": [
+        {
+          "offset": 0,
+          "u16le": 257,
+          "s16le": 257,
+          "u16be": 257
+        },
+        {
+          "offset": 1,
+          "u16le": 1,
+          "s16le": 1,
+          "u16be": 256
+        },
+        {
+          "offset": 2,
+          "u16le": 3584,
+          "s16le": 3584,
+          "u16be": 14
+        },
+        {
+          "offset": 3,
+          "u16le": 32270,
+          "s16le": 32270,
+          "u16be": 3710
+        },
+        {
+          "offset": 4,
+          "u16le": 3454,
+          "s16le": 3454,
+          "u16be": 32269
+        },
+        {
+          "offset": 5,
+          "u16le": 13,
+          "s16le": 13,
+          "u16be": 3328
+        },
+        {
+          "offset": 6,
+          "u16le": 0,
+          "s16le": 0,
+          "u16be": 0
+        },
+        {
+          "offset": 7,
+          "u16le": 48640,
+          "s16le": -16896,
+          "u16be": 190
+        },
+        {
+          "offset": 8,
+          "u16le": 1726,
+          "s16le": 1726,
+          "u16be": 48646
+        },
+        {
+          "offset": 9,
+          "u16le": 6,
+          "s16le": 6,
+          "u16be": 1536
+        },
+        {
+          "offset": 10,
+          "u16le": 0,
+          "s16le": 0,
+          "u16be": 0
+        },
+        {
+          "offset": 11,
+          "u16le": 11520,
+          "s16le": 11520,
+          "u16be": 45
+        },
+        {
+          "offset": 12,
+          "u16le": 33837,
+          "s16le": -31699,
+          "u16be": 11652
+        }
+      ],
+      "checksum": {
+        "sum8_zero": false,
+        "sum8_ff": false,
+        "xor_zero": false,
+        "crc16_modbus": false,
+        "crc16_kermit": true
+      },
+      "pattern": "B",
+      "repeat_count": 1,
+      "wire": "A"
+    },
+    {
+      "number": 3,
+      "start_us": 14992072,
+      "end_us": 14994500.611111112,
+      "values": [
+        1,
+        1,
+        0,
+        10,
+        0,
+        0,
+        231,
+        135,
+        25,
+        0,
+        63,
+        21
+      ],
+      "hex": "01 01 00 0A 00 00 E7 87 19 00 3F 15",
+      "decimal": "1 1 0 10 0 0 231 135 25 0 63 21",
+      "ascii": "..........?.",
+      "numeric": [
+        {
+          "offset": 0,
+          "u16le": 257,
+          "s16le": 257,
+          "u16be": 257
+        },
+        {
+          "offset": 1,
+          "u16le": 1,
+          "s16le": 1,
+          "u16be": 256
+        },
+        {
+          "offset": 2,
+          "u16le": 2560,
+          "s16le": 2560,
+          "u16be": 10
+        },
+        {
+          "offset": 3,
+          "u16le": 10,
+          "s16le": 10,
+          "u16be": 2560
+        },
+        {
+          "offset": 4,
+          "u16le": 0,
+          "s16le": 0,
+          "u16be": 0
+        },
+        {
+          "offset": 5,
+          "u16le": 59136,
+          "s16le": -6400,
+          "u16be": 231
+        },
+        {
+          "offset": 6,
+          "u16le": 34791,
+          "s16le": -30745,
+          "u16be": 59271
+        },
+        {
+          "offset": 7,
+          "u16le": 6535,
+          "s16le": 6535,
+          "u16be": 34585
+        },
+        {
+          "offset": 8,
+          "u16le": 25,
+          "s16le": 25,
+          "u16be": 6400
+        },
+        {
+          "offset": 9,
+          "u16le": 16128,
+          "s16le": 16128,
+          "u16be": 63
+        },
+        {
+          "offset": 10,
+          "u16le": 5439,
+          "s16le": 5439,
+          "u16be": 16149
+        }
+      ],
+      "checksum": {
+        "sum8_zero": false,
+        "sum8_ff": false,
+        "xor_zero": false,
+        "crc16_modbus": false,
+        "crc16_kermit": false
+      },
+      "pattern": "C",
+      "repeat_count": 1,
+      "wire": "A"
+    }
+  ]
+}

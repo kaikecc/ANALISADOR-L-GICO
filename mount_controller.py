@@ -7,6 +7,7 @@ import glob
 import math
 import queue
 import re
+import sys
 import threading
 import time
 from collections import deque
@@ -284,7 +285,7 @@ class MountControllerAPI:
             connection = serial.Serial(str(port), int(baud), timeout=0.2, write_timeout=0.5)
             # Abrir a USB reinicia o Mega. A negociação da montagem, o RTC e o
             # BNO055 levam cerca de seis segundos antes de pollConsole() iniciar.
-            time.sleep(7.0)
+            time.sleep(11.0)
             connection.reset_input_buffer()
             self.serial_port = connection
             self.connected_port = str(port)
@@ -296,9 +297,6 @@ class MountControllerAPI:
                 daemon=True,
             )
             self.reader_thread.start()
-            # Estado inicial conservador: ambos os motores recebem parada.
-            self._send_raw(b"!\n")
-            time.sleep(0.08)
             now = datetime.now(timezone.utc)
             self._send_line(
                 f"RTC SET {now.year} {now.month} {now.day} "
@@ -444,6 +442,9 @@ class MountControllerAPI:
 
     def query(self) -> dict:
         return self._command("QUERY")
+
+    def initialize_mount(self) -> dict:
+        return self._command("INIT")
 
     def move(self, axis: str, direction: str, speed: int) -> dict:
         axis = axis.upper()
@@ -816,7 +817,10 @@ def main() -> None:
     html_path = Path(__file__).with_name("mount_controller.html").resolve()
     # Evita que o WebKit reutilize uma versão antiga da interface após uma
     # atualização do HTML/JavaScript.
-    page = f"{html_path.as_uri()}?v={html_path.stat().st_mtime_ns}"
+    if sys.platform == "win32":
+        page = html_path.as_uri()
+    else:
+        page = f"{html_path.as_uri()}?v={html_path.stat().st_mtime_ns}"
     window = webview.create_window(
         "LogicLab — Controle Altazimutal",
         page,
@@ -827,7 +831,8 @@ def main() -> None:
         background_color="#0d1015",
     )
     window.events.closed += api.close
-    webview.start(gui="cocoa", debug=False)
+    gui = "cocoa" if sys.platform == "darwin" else None
+    webview.start(gui=gui, debug=False)
 
 
 if __name__ == "__main__":

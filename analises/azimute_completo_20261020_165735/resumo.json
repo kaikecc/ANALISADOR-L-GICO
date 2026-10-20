@@ -1,0 +1,55 @@
+{
+  "source": "captures\\azimute_completo_20261020_165735.csv",
+  "sha256": "a153b1a2096f8b1aa6c2efb726383900a77d4bd8a1361aac95e11aa8fb39b6e9",
+  "samples": 17785,
+  "last_transition_s": 86.248918,
+  "quality": {
+    "A": {
+      "stop_9_5": {
+        "bytes": 2404,
+        "framing_errors": 10,
+        "frames": 172,
+        "valid": 153
+      },
+      "hold_9_8": {
+        "bytes": 2332,
+        "framing_errors": 52,
+        "frames": 172,
+        "valid": 96
+      }
+    },
+    "B": {
+      "stop_9_5": {
+        "bytes": 2842,
+        "framing_errors": 0,
+        "frames": 203,
+        "valid": 202
+      },
+      "hold_9_8": {
+        "bytes": 2792,
+        "framing_errors": 7,
+        "frames": 203,
+        "valid": 159
+      }
+    }
+  },
+  "position_queries": 168,
+  "matched_responses": 168,
+  "response_start_latency_us": {
+    "min": 2550,
+    "median": 2564.0,
+    "max": 2606
+  },
+  "query_period_median_us": 285075,
+  "valid_commands": {
+    "0D": 1,
+    "0B": 1,
+    "80": 15,
+    "0A": 3,
+    "0E": 1,
+    "C0": 10,
+    "81": 2,
+    "C1": 2,
+    "09": 167
+  }
+}

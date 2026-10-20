@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""LogicLab nativo: interface WebKit embutida em um processo Python."""
+"""LogicLab nativo: interface web embutida em um processo Python."""
 
 from __future__ import annotations
 
@@ -15,6 +15,8 @@ from pathlib import Path
 
 import webview
 
+from logiclab_sigrok import SigrokWorker, scan_devices
+
 from logic_analyzer import (AnalyzerModel, Sample, SerialWorker,
                             analyze_repetition, decode_hex_candidates,
                             decode_uart_duplex, list_ports)
@@ -28,6 +30,8 @@ class LogicLabAPI:
         self.worker = SerialWorker(self.model, self.events)
         self.capturing = False
         self.finalizing = False
+        self.capture_error = None
+        self.capture_partial = False
         self.last_saved_path = None
         self.messages: list[str] = []
         # Controles nunca esperam uma análise pesada terminar. STOP,
@@ -83,7 +87,9 @@ class LogicLabAPI:
             self.jobs.pop(job_id, None)
         return response
 
-    def ports(self):
+    def ports(self, source="serial"):
+        if source == "usb":
+            return scan_devices()
         detected = {}
         if list_ports is not None:
             for port in list_ports.comports():
@@ -100,8 +106,13 @@ class LogicLabAPI:
         try:
             if not port:
                 return {"ok": False, "message": "Selecione uma porta serial antes de conectar"}
+            if self.capturing or self.finalizing or isinstance(self.worker, SigrokWorker) and self.worker.running:
+                return {"ok": False, "message": "Aguarde a captura terminar antes de conectar"}
             if self.worker.port:
                 self.worker.disconnect()
+            worker_class = SigrokWorker if str(port).startswith("fx2lafw") else SerialWorker
+            if not isinstance(self.worker, worker_class):
+                self.worker = worker_class(self.model, self.events)
             self.worker.connect(str(port), int(baud))
             self.worker.send("PING")
             return {"ok": True, "message": f"Porta aberta: {port}"}
@@ -117,18 +128,33 @@ class LogicLabAPI:
             self.last_saved_path = str(path)
         return {"ok": True, "message": "Desconectado"}
 
-    def capture(self, start):
+    def capture(self, start, options=None):
         if not self.worker.port:
             return {"ok": False, "message": "Conecte uma porta serial primeiro"}
         if start:
+            if self.capturing or self.finalizing or isinstance(self.worker, SigrokWorker) and self.worker.running:
+                return {"ok": False, "message": "Captura/conversão já em andamento"}
+            if isinstance(self.worker, SigrokWorker):
+                options = options or {}
+                self.worker.configure(options.get("samplerate", 1000000), options.get("seconds", 2),
+                                      options.get("channel_a", 0), options.get("channel_b", 1))
             self.model.clear()
             target = (Path(__file__).with_name("captures") /
-                      f"azimute_completo_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv")
+                      f"{'usb' if isinstance(self.worker, SigrokWorker) else 'azimute_completo'}_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}.csv")
             self.model.start_recording(target)
             self.capturing = True
             self.finalizing = False
+            self.capture_error = None
+            self.capture_partial = False
             self.last_saved_path = None
-            self.worker.send("START")
+            try:
+                self.worker.send("START")
+            except Exception:
+                self.capturing = False
+                self.model.stop_recording()
+                raise
+            if isinstance(self.worker, SigrokWorker):
+                return {"ok": True, "message": f"Captura USB de {self.worker.seconds:g} s iniciada; gráfico atualizado durante a aquisição"}
             return {"ok": True, "message": f"Captura contínua iniciada • salvando em {target.name}"}
         self.capturing = False
         self.finalizing = True
@@ -143,7 +169,9 @@ class LogicLabAPI:
         try:
             self.worker.send_immediate("STOP")
             self.capturing = False
-            self.finalizing = True
+            self.finalizing = self.worker.running if isinstance(self.worker, SigrokWorker) else True
+            if isinstance(self.worker, SigrokWorker):
+                return {"ok": True, "message": "Parada solicitada; interrompendo captura/conversão. Arquivo bruto preservado."}
             return {"ok": True, "message": "Finalizando captura • recebendo o buffer restante e salvando o CSV…"}
         except Exception as exc:
             self.capturing = False
@@ -157,12 +185,15 @@ class LogicLabAPI:
             except queue.Empty:
                 break
             if kind == "capture_end":
+                if isinstance(value, dict):
+                    self.capture_error = value.get("error")
+                    self.capture_partial = value.get("status") == "partial"
                 self.capturing = False
                 self.finalizing = False
                 path = self.model.stop_recording()
                 if path:
                     self.last_saved_path = str(path)
-                    self.messages.append(f"CSV completo salvo: {path}")
+                    self.messages.append(f"CSV salvo: {path}")
             elif kind in ("log", "ready", "error"):
                 self.messages.append(str(value))
                 self.messages = self.messages[-20:]
@@ -172,8 +203,15 @@ class LogicLabAPI:
                 path = self.model.stop_recording()
                 if path:
                     self.last_saved_path = str(path)
+        if isinstance(self.worker, SigrokWorker) and not self.worker.running:
+            # STOP pode chegar após o evento de conclusão já ter sido consumido.
+            self.capturing = False
+            self.finalizing = False
         version = self.model.current_version()
         result = {
+            "usb": self.worker.diagnostics() if isinstance(self.worker, SigrokWorker) else None,
+            "capture_error": self.capture_error,
+            "capture_partial": self.capture_partial,
             "version": version,
             "connected": bool(self.worker.port),
             "capturing": self.capturing,
@@ -190,7 +228,7 @@ class LogicLabAPI:
 
     def analyze_samples(self, rows):
         rows = rows[-20_000:]
-        samples = [Sample(int(row[0]), int(row[1]) | (int(row[2]) << 1))
+        samples = [Sample(float(row[0]), int(row[1]) | (int(row[2]) << 1))
                    for row in rows]
         results = []
         for channel in (0, 1):
@@ -209,13 +247,13 @@ class LogicLabAPI:
 
     def decode_samples(self, rows, channel=1):
         rows = rows[-20_000:]
-        samples = [Sample(int(row[0]), int(row[1]) | (int(row[2]) << 1))
+        samples = [Sample(float(row[0]), int(row[1]) | (int(row[2]) << 1))
                    for row in rows]
         return decode_hex_candidates(samples, int(channel))
 
     def decode_uart_samples(self, rows, baud=57600):
         rows = rows[-20_000:]
-        samples = [Sample(int(row[0]), int(row[1]) | (int(row[2]) << 1))
+        samples = [Sample(float(row[0]), int(row[1]) | (int(row[2]) << 1))
                    for row in rows]
         decoded = decode_uart_duplex(samples, int(baud))
         self._annotate_cosmic_cruiser(decoded)
@@ -323,7 +361,7 @@ class LogicLabAPI:
 
     def export_csv(self, rows=None):
         recorded = self.model.flush_recording()
-        if recorded and recorded.exists():
+        if not rows and recorded and recorded.exists():
             return {
                 "ok": True,
                 "message": f"CSV completo já salvo: {recorded}",
@@ -353,8 +391,8 @@ class LogicLabAPI:
 
     def close(self):
         self.finalizing = False
-        self.model.stop_recording()
         self.worker.disconnect()
+        self.model.stop_recording()
         self.control_executor.shutdown(wait=False, cancel_futures=True)
         self.analysis_executor.shutdown(wait=False, cancel_futures=True)
 
@@ -371,8 +409,10 @@ def main():
         min_size=(960, 620),
         background_color="#000000",
     )
-    window.events.closed += api.close
-    webview.start(gui="cocoa", debug=False)
+    try:
+        webview.start(debug=False)
+    finally:
+        api.close()
 
 
 if __name__ == "__main__":

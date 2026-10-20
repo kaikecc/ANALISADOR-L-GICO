@@ -4,6 +4,71 @@ Interface visual em Python dedicada à leitura passiva de um protocolo propriet�
 
 ## Início rápido
 
+### Windows — interface nativa
+
+Dê dois cliques em `iniciar_logiclab.bat`. Na primeira execução, ele cria
+`.venv-win` e instala as dependências de `requirements-win.txt` (requer internet).
+É necessário Python 3.10 ou superior com pip e Tcl/Tk. O aplicativo abre
+`logiclab_native.py`, que carrega `logiclab_viewer.html` com acesso à porta serial.
+Abrir o HTML diretamente permite visualizar CSVs, mas não conectar ao Arduino.
+`logiclab_graph.html` é uma prévia estática gerada pela interface clássica.
+
+### Analisador USB de 8 canais / 24 MHz
+
+As duas interfaces (`logic_analyzer.py` e `logiclab_native.py`, aberta pelo
+`iniciar_logiclab.bat`) oferecem a fonte **USB Logic Analyzer 24MHz**. O suporte
+é para dispositivos FX2 de **oito canais** reconhecidos pelo driver `fx2lafw`
+do sigrok, como os clones do Saleae Logic. Dispositivos de 16 canais ou de
+outros drivers não são selecionados por essa integração.
+
+1. Instale o [sigrok-cli para Windows](https://sigrok.org/download/binary/sigrok-cli/).
+   O PulseView sozinho não fornece necessariamente esse executável. O aplicativo
+   procura no PATH, em `Program Files/sigrok/sigrok-cli`, em
+   `Program Files (x86)/sigrok/sigrok-cli` e em
+   `%LOCALAPPDATA%/LogicLab/sigrok-cli`. Para outro local, defina
+   `LOGICLAB_SIGROK` com o caminho completo do executável (sem aspas no valor).
+2. O dispositivo deve ter um driver USB compatível. No Windows, siga as
+   [instruções do sigrok para WinUSB/Zadig](https://sigrok.org/wiki/Windows).
+   Selecione somente o analisador ao configurar o driver. Feche PulseView ou
+   outro programa que esteja usando o dispositivo antes de capturar.
+3. Abra o LogicLab, selecione **USB Logic Analyzer 24MHz**, atualize a lista,
+   escolha o dispositivo e clique em **Conectar**. Ele é USB, não uma porta COM.
+4. Escolha taxa, duração (0,01–300 segundos) e dois canais diferentes entre D0
+   e D7 para Fio A/B. O padrão é 1 MHz, 2 segundos, A=D0 e B=D1.
+5. Clique em **Capturar**. A aquisição é gravada em disco; o gráfico acompanha os dados
+   gravados, com pequena latência de leitura e conversão. Para uma medição completa, aguarde a duração
+   escolhida. **Parar** interrompe a aquisição e a conversão. O bruto e o trecho de CSV
+   já gravados são preservados como captura parcial; o buffer final pode ser perdido.
+
+O analisador USB é um instrumento passivo. Use GND comum e respeite a tensão
+de entrada especificada pelo fabricante do seu modelo.
+
+Arquivos em `captures/`:
+
+- `fx2_*.bin`: oito canais originais, um byte por amostra, D0 no bit 0.
+- `fx2_*.json`: taxa, canais escolhidos, número de amostras e estado
+  `complete`, `partial` ou `error`.
+- `fx2_*.log`: diagnóstico do sigrok-cli.
+- `usb_*.csv`: transições dos dois canais escolhidos, com `tempo_us` fracionário.
+  Os cabeçalhos `fio_A_D2`/`fio_B_D3` são mantidos por compatibilidade; em USB
+  representam os canais selecionados, não os pinos D2/D3 do Mega.
+
+O bruto preserva a resolução de uma amostra (aproximadamente 41,67 ns em
+24 MHz). O CSV mantém tempos fracionários em microssegundos. A janela em RAM
+é limitada; o CSV automático e o bruto em disco devem ser usados para guardar
+a aquisição completa. Em 24 MHz, o bruto usa aproximadamente 24 MB por segundo,
+antes do espaço adicional para CSV. A taxa suportada na prática depende do
+dispositivo, da USB e do disco; erros são apresentados pelo aplicativo.
+
+Para reabrir o bruto no PulseView, importe como **Raw binary logic data**, com
+oito canais e a taxa indicada no JSON. O CSV pode ser importado diretamente
+no LogicLab. A visualização atual continua dedicada a dois fios; não exibe
+os oito canais simultaneamente.
+
+Testes offline: `python -m unittest discover -s tests -v`.
+
+### Arduino Mega
+
 1. Abra `arduino/logic_analyzer/logic_analyzer.ino` na Arduino IDE e grave na placa.
 2. No computador, execute:
 

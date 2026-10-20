@@ -20,6 +20,8 @@ import threading
 import time
 import tkinter as tk
 import webbrowser
+
+from logiclab_sigrok import SigrokWorker, RATES, scan_devices
 from datetime import datetime
 from pathlib import Path
 from collections import deque
@@ -52,7 +54,7 @@ WEB_VIEWER = Path(__file__).with_name("logiclab_graph.html")
 
 @dataclass
 class Sample:
-    us: int
+    us: float
     bits: int
 
 
@@ -76,7 +78,7 @@ class AnalyzerModel:
         self.recording_path: Path | None = None
         self.malformed_samples = 0
 
-    def add(self, us: int, bits: int):
+    def add(self, us: float, bits: int):
         with self.lock:
             # A captura é limpa explicitamente antes de START. Um timestamp que
             # volta durante a mesma aquisição é uma linha serial corrompida;
@@ -504,7 +506,7 @@ def format_time(us: float) -> str:
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title(f"LogicLab {BUILD_ID} — Arduino Protocol Analyzer")
+        self.title(f"LogicLab {BUILD_ID} — Serial / USB Logic Analyzer")
         self.geometry("1280x780")
         self.minsize(960, 620)
         self.configure(bg=BG)
@@ -512,6 +514,8 @@ class App(tk.Tk):
         self.events = queue.Queue()
         self.worker = SerialWorker(self.model, self.events)
         self.capturing = False
+        self.usb_busy = False
+        self.source_var = tk.StringVar(value="Arduino serial")
         self.demo = False
         self.demo_us = 0
         self.demo_last_bits = None
@@ -525,6 +529,7 @@ class App(tk.Tk):
         else:
             self._build()
         self.bind("<Command-d>" if sys.platform == "darwin" else "<Control-d>", lambda _e: self.toggle_demo())
+        self._build_usb_controls()
         self.refresh_ports()
         self.after(30, self._tick)
         self.protocol("WM_DELETE_WINDOW", self._close)
@@ -594,7 +599,7 @@ class App(tk.Tk):
         body.add(main, weight=1)
         ttk.Label(sidebar, text="CANAIS", background=PANEL, foreground=MUTED).pack(anchor="w", pady=(0, 8))
         self.channel_vars = []
-        for i, name in enumerate(["FIO A  D2 / INT4", "FIO B  D3 / INT5"]):
+        for i, name in enumerate(["FIO A", "FIO B"]):
             var = tk.BooleanVar(value=True)
             self.channel_vars.append(var)
             cb = tk.Checkbutton(sidebar, text=name, variable=var, command=self.channels_changed, bg=PANEL, fg=CHANNEL_COLORS[i], selectcolor=PANEL_2, activebackground=PANEL, activeforeground=CHANNEL_COLORS[i], anchor="w", relief="flat", pady=6)
@@ -689,7 +694,7 @@ class App(tk.Tk):
         main.pack(side="left", fill="both", expand=True)
         tk.Label(sidebar, text="CANAIS", bg=legacy_panel, fg=legacy_muted).pack(anchor="w", pady=(0, 8))
         self.channel_vars = []
-        names = ["FIO A  D2 / INT4", "FIO B  D3 / INT5"]
+        names = ["FIO A", "FIO B"]
         for i, name in enumerate(names):
             var = tk.BooleanVar(value=True)
             self.channel_vars.append(var)
@@ -719,7 +724,59 @@ class App(tk.Tk):
         tk.Label(self, textvariable=self.footer_var, bg=legacy_bg, fg=legacy_muted,
                  anchor="w").pack(fill="x", padx=22, pady=(0, 10))
 
+    def _build_usb_controls(self):
+        bar = ttk.Frame(self, padding=(20, 5))
+        bar.pack(fill="x", before=self.winfo_children()[0])
+        ttk.Label(bar, text="Fonte").pack(side="left")
+        source = ttk.Combobox(bar, textvariable=self.source_var, state="readonly", width=23,
+                             values=("Arduino serial", "USB Logic Analyzer 24MHz"))
+        source.pack(side="left", padx=6)
+        source.bind("<<ComboboxSelected>>", self.change_source)
+        self.rate_var = tk.StringVar(value="1000000")
+        self.duration_var = tk.StringVar(value="2")
+        self.usb_a_var, self.usb_b_var = tk.StringVar(value="0"), tk.StringVar(value="1")
+        for label, variable, choices, width in (
+            ("Taxa USB (Hz)", self.rate_var, RATES, 10),
+            ("Duração USB (s)", self.duration_var, None, 5),
+            ("Fio A = D", self.usb_a_var, range(8), 3),
+            ("Fio B = D", self.usb_b_var, range(8), 3),
+        ):
+            ttk.Label(bar, text=label).pack(side="left", padx=(8, 2))
+            if choices is None:
+                widget = ttk.Entry(bar, textvariable=variable, width=width)
+            else:
+                widget = ttk.Combobox(bar, textvariable=variable, values=list(choices), state="readonly", width=width)
+            widget.pack(side="left")
+
+    def change_source(self, _event=None):
+        old_usb = isinstance(self.worker, SigrokWorker)
+        if self.capturing or self.usb_busy or getattr(self.worker, "running", False) and old_usb:
+            self.source_var.set("USB Logic Analyzer 24MHz" if old_usb else "Arduino serial")
+            self.footer_var.set("Pare a captura e aguarde a conversão antes de trocar a fonte")
+            return
+        self.worker.disconnect()
+        self.demo = False
+        self.worker = (SigrokWorker if self.source_var.get().startswith("USB") else SerialWorker)(self.model, self.events)
+        self._set_connected(False)
+        self.port_var.set("")
+        self.refresh_ports()
+
     def refresh_ports(self, quiet=False):
+        if not isinstance(self.worker, SigrokWorker):
+            return self._refresh_serial_ports(quiet)
+        if self.usb_busy or self.capturing or self.worker.running:
+            return
+        self.usb_busy = True
+        self.footer_var.set("Procurando analisadores USB FX2…")
+        def scan():
+            try:
+                self.events.put(("usb_devices", scan_devices()))
+            except Exception as exc:
+                self.events.put(("usb_scan_error", str(exc)))
+        threading.Thread(target=scan, daemon=True).start()
+
+    def _refresh_serial_ports(self, quiet=False):
+
         detected = list(list_ports.comports()) if list_ports else []
         self.port_lookup = {}
         displays = []
@@ -766,6 +823,25 @@ class App(tk.Tk):
         self.footer_var.set(f"Interface selecionada: {device} • clique em Conectar para testar")
 
     def toggle_connection(self):
+        if self.usb_busy or isinstance(self.worker, SigrokWorker) and self.worker.running:
+            self.footer_var.set("Aguarde a operação USB terminar")
+            return
+        if isinstance(self.worker, SigrokWorker):
+            if self.worker.port:
+                self.worker.disconnect()
+                self._set_connected(False)
+            else:
+                self.usb_busy = True
+                device = self.selected_port()
+                def connect_usb():
+                    try:
+                        self.worker.connect(device)
+                    except Exception as exc:
+                        self.events.put(("usb_scan_error", str(exc)))
+                    finally:
+                        self.events.put(("usb_connect_done", None))
+                threading.Thread(target=connect_usb, daemon=True).start()
+            return
         if self.worker.port:
             self.worker.disconnect()
             self._set_connected(False)
@@ -788,6 +864,27 @@ class App(tk.Tk):
         self.status_dot.configure(text="●  CONECTADO" if value else "●  DESCONECTADO", fg=ACCENT if value else MUTED)
 
     def toggle_capture(self):
+        if isinstance(self.worker, SigrokWorker):
+            if self.worker.running:
+                self.worker.send_immediate("STOP")
+                self.footer_var.set("Finalizando USB; dados já gravados serão convertidos…")
+                return
+            if not self.worker.port:
+                messagebox.showinfo("Sem dispositivo", "Selecione o analisador USB e clique em Conectar")
+                return
+            try:
+                self.worker.configure(self.rate_var.get(), self.duration_var.get(), self.usb_a_var.get(), self.usb_b_var.get())
+                self.clear()
+                target = Path(__file__).with_name("captures") / f"usb_{datetime.now():%Y%m%d_%H%M%S_%f}.csv"
+                self.model.start_recording(target)
+                self.worker.send("START")
+                self.capturing = True
+                self.capture_btn.configure(text="■ Parar USB")
+                self.footer_var.set(f"Capturando USB por {self.worker.seconds:g} s; gráfico atualizado durante a aquisição")
+            except Exception as exc:
+                self.model.stop_recording()
+                messagebox.showerror("Captura USB", str(exc))
+            return
         starting = not self.capturing
         if starting and not self.worker.port and not self.demo:
             messagebox.showinfo(
@@ -806,6 +903,9 @@ class App(tk.Tk):
         self.footer_var.set("Capturando sinais…" if self.capturing else f"Captura pausada • {len(self.model.snapshot()):,} amostras")
 
     def toggle_demo(self):
+        if isinstance(self.worker, SigrokWorker):
+            messagebox.showinfo("Modo demo", "Selecione a fonte Arduino serial para usar a demonstração")
+            return
         self.demo = not self.demo
         if self.demo:
             self.clear()
@@ -820,7 +920,7 @@ class App(tk.Tk):
             self.capturing = False
             self.capture_btn.configure(text="▶  Capturar")
             self.status_dot.configure(text="●  DESCONECTADO", fg=MUTED)
-            self.title(f"LogicLab {BUILD_ID} — Arduino Protocol Analyzer")
+            self.title(f"LogicLab {BUILD_ID} — Serial / USB Logic Analyzer")
             self.footer_var.set("Modo demonstração desativado")
 
     def _demo_sample(self):
@@ -846,20 +946,38 @@ class App(tk.Tk):
                 kind, value = self.events.get_nowait()
             except queue.Empty:
                 break
-            if kind == "log":
+            if kind == "usb_devices":
+                self.usb_busy = False
+                self.port_lookup = {f"{d['description']} — {d['device']}": d['device'] for d in value}
+                displays = list(self.port_lookup)
+                if isinstance(self.port_box, ttk.Combobox):
+                    self.port_box["values"] = displays
+                self.port_var.set(displays[0] if displays else "")
+                self.footer_var.set(f"{len(displays)} analisador(es) USB encontrados" if displays else "Nenhum FX2 encontrado; confira USB/WinUSB e feche PulseView/Logic")
+            elif kind == "usb_scan_error":
+                self.usb_busy = False
+                self.footer_var.set(str(value))
+                messagebox.showerror("Analisador USB", str(value))
+            elif kind == "usb_connect_done":
+                self.usb_busy = False
+            elif kind == "log":
                 if str(value) != "END":
                     self.last_board_message = str(value)
                 self.footer_var.set(str(value))
             elif kind == "ready":
                 self._set_connected(True)
-                self.status_dot.configure(text="●  ARDUINO ATIVO", fg=ACCENT)
+                self.status_dot.configure(text="●  USB FX2 SELECIONADO" if isinstance(self.worker, SigrokWorker) else "●  ARDUINO ATIVO", fg=ACCENT)
                 self.footer_var.set(f"Comunicação confirmada: {value}")
             elif kind == "error":
-                messagebox.showerror("Erro serial", str(value))
+                messagebox.showerror("Erro de aquisição", str(value))
             elif kind == "capture_end":
                 self.capturing = False
                 self.capture_btn.configure(text="▶  Capturar")
-                self.footer_var.set(f"Captura recebida • {len(self.model.snapshot()):,} transições • clique em Analisar protocolo")
+                if isinstance(value, dict) and value.get("status") == "error":
+                    self.footer_var.set(f"Falha USB: {value.get('error')}")
+                else:
+                    partial = "parcial" if isinstance(value, dict) and value.get("status") == "partial" else "finalizada"
+                    self.footer_var.set(f"Captura {partial} • {self.model.count():,} estados na janela • CSV: {self.model.recording_path or 'use Exportar CSV'}")
             elif kind == "disconnected" and not self.demo and not self.worker.port:
                 self._set_connected(False)
         # Redesenhar milhares de pontos continuamente, mesmo sem dados novos,
@@ -879,7 +997,7 @@ class App(tk.Tk):
             edges_a += bool(changed & 0x01)
             edges_b += bool(changed & 0x02)
         port_state = "ABERTA" if self.worker.port else "FECHADA"
-        capture_state = "ATIVA — dados ficam no Mega até Parar" if self.capturing else "PARADA"
+        capture_state = "ATIVA" if self.capturing else "PARADA"
         if len(data) > 1:
             span = format_time(data[-1].us - data[0].us)
             levels = f"A={(data[-1].bits & 1)}  B={((data[-1].bits >> 1) & 1)}"
@@ -899,6 +1017,9 @@ class App(tk.Tk):
         self.wave.redraw()
 
     def clear(self):
+        if isinstance(self.worker, SigrokWorker) and self.worker.running:
+            self.footer_var.set("Aguarde a captura/conversão USB terminar")
+            return
         self.model.clear()
         self.table.delete(*self.table.get_children())
         self.wave.cursor_a = self.wave.cursor_b = None
@@ -920,6 +1041,9 @@ class App(tk.Tk):
         self.footer_var.set(f"Exportado: {path}")
 
     def import_csv(self):
+        if isinstance(self.worker, SigrokWorker) and self.worker.running:
+            self.footer_var.set("Aguarde a captura/conversão USB terminar")
+            return
         path = filedialog.askopenfilename(filetypes=[("CSV", "*.csv"), ("Todos", "*")])
         if not path:
             return
@@ -1117,12 +1241,12 @@ def read_capture_csv(path: str) -> tuple[list[Sample], int]:
             raise ValueError("Colunas esperadas: tempo_us, fio_A_D2, fio_B_D3")
         for line, row in enumerate(reader, start=2):
             try:
-                us = int(row["tempo_us"])
+                us = float(row["tempo_us"])
                 a = int(row["fio_A_D2"])
                 b = int(row["fio_B_D3"])
             except (TypeError, ValueError) as exc:
                 raise ValueError(f"Valor inválido na linha {line}") from exc
-            if us < 0 or a not in (0, 1) or b not in (0, 1):
+            if not math.isfinite(us) or us < 0 or a not in (0, 1) or b not in (0, 1):
                 raise ValueError(f"Valor fora do intervalo na linha {line}")
             rows.append(Sample(us, a | (b << 1)))
     if not rows:
@@ -1130,7 +1254,7 @@ def read_capture_csv(path: str) -> tuple[list[Sample], int]:
     repaired = 0
     for index in range(1, len(rows) - 1):
         if rows[index].us < rows[index - 1].us < rows[index + 1].us:
-            rows[index].us = (rows[index - 1].us + rows[index + 1].us) // 2
+            rows[index].us = (rows[index - 1].us + rows[index + 1].us) / 2
             repaired += 1
     # Reinícios reais continuam separando capturas; preserve o trecho mais
     # recente, mas timestamps isolados já não eliminam milhares de amostras.
@@ -1159,14 +1283,14 @@ header{padding:16px 22px;border-bottom:1px solid #555;display:flex;gap:24px;alig
 <span class="muted" id="info"></span></header><canvas id="scope"></canvas>
 <script>const data=WEB_VIEW_DATA;const c=document.getElementById('scope'),x=c.getContext('2d');
 function draw(){const d=devicePixelRatio||1,w=innerWidth,h=innerHeight-74;c.width=w*d;c.height=h*d;x.scale(d,d);
-x.fillStyle='#000';x.fillRect(0,0,w,h);const L=72,R=20,T=28,B=42,pw=w-L-R,ph=h-T-B;
+x.fillStyle='#000';x.fillRect(0,0,w,h);if(!data.length){document.getElementById('info').textContent='Nenhuma amostra';return;}const L=72,R=20,T=28,B=42,pw=w-L-R,ph=h-T-B;
 x.strokeStyle='#fff';x.lineWidth=1;x.font='12px Menlo';x.fillStyle='#fff';
 for(let i=0;i<=10;i++){const xx=L+pw*i/10;x.globalAlpha=i?0.32:1;x.beginPath();x.moveTo(xx,T);x.lineTo(xx,T+ph);x.stroke();
 const us=data[0][0]+(data[data.length-1][0]-data[0][0])*i/10;x.globalAlpha=1;x.fillText((us/1000).toFixed(1)+' ms',xx-24,T+ph+24)}
 for(let r=0;r<2;r++){const y0=T+r*ph/2,hi=y0+ph*.12,lo=y0+ph*.38;x.strokeStyle='#fff';x.globalAlpha=.55;
 [hi,lo].forEach(y=>{x.beginPath();x.moveTo(L,y);x.lineTo(L+pw,y);x.stroke()});x.globalAlpha=1;x.fillText(r?'B':'A',22,y0+ph*.25);x.fillText('1',50,hi+4);x.fillText('0',50,lo+4);
 x.strokeStyle=r?'#ff3df2':'#00e5ff';x.lineWidth=3;x.beginPath();let prev=data[0][r+1],py=prev?hi:lo;x.moveTo(L,py);
-for(let i=1;i<data.length;i++){const xx=L+(data[i][0]-data[0][0])/(data[data.length-1][0]-data[0][0]||1)*pw,n=data[i][r+1],ny=n?hi:lo;x.lineTo(xx,py);if(n!==prev)x.lineTo(xx,ny);prev=n;py=ny}x.lineTo(L+pw,py);x.stroke()}}
+for(let i=1;i<data.length;i++){const xx=L+(data[i][0]-data[0][0])/(data[data.length-1][0]-data[0][0]||1)*pw,n=data[i][r+1],ny=n?hi:lo;x.lineTo(xx,py);if(n!==prev)x.lineTo(xx,ny);prev=n;py=ny}x.lineTo(L+pw,py);x.stroke()}
 document.getElementById('info').textContent=data.length.toLocaleString('pt-BR')+' amostras • '+((data.at(-1)[0]-data[0][0])/1000).toFixed(2)+' ms';}
 addEventListener('resize',draw);draw();</script></body></html>"""
     document = document.replace("WEB_VIEW_BUILD", BUILD_ID)

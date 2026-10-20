@@ -40,7 +40,9 @@
 </head>
 <body>
   <header><div class="brand"><h1>LogicLab</h1><small>Analisador lógico</small></div><div class="toolbar">
-    <div class="group"><label class="field"><span>PORTA SERIAL</span><select id="port"><option value="">Porta serial</option></select></label><button id="refresh" title="Atualizar portas">↻</button><button id="connect">Conectar</button><button id="capture" class="primary">Capturar</button></div>
+    <div class="group"><label class="field"><span>FONTE</span><select id="source"><option value="serial">Arduino serial</option><option value="usb">USB Logic Analyzer 24MHz</option></select></label></div>
+    <div class="group" id="usbSettings" hidden><label class="field"><span>TAXA USB</span><select id="usbRate"><option value="1000000">1 MHz</option><option value="2000000">2 MHz</option><option value="4000000">4 MHz</option><option value="8000000">8 MHz</option><option value="12000000">12 MHz</option><option value="16000000">16 MHz</option><option value="24000000">24 MHz</option></select></label><label class="field"><span>DURAÇÃO (s)</span><input id="usbSeconds" type="number" min="0.01" max="300" step="0.01" value="2" style="width:65px"></label><label class="field"><span>FIO A</span><select id="usbA"></select></label><label class="field"><span>FIO B</span><select id="usbB"></select></label></div>
+    <div class="group"><label class="field"><span>DISPOSITIVO</span><select id="port"><option value="">Porta serial</option></select></label><button id="refresh" title="Atualizar portas">↻</button><button id="connect">Conectar</button><button id="capture" class="primary">Capturar</button></div>
     <div class="group"><label class="file">Importar CSV<input id="file" type="file" accept=".csv,text/csv"></label><button id="exportCsv">Exportar CSV</button><button id="exportReplay">Exportar replay</button><button id="analyze">Repetição</button><button id="decode">Decodificar UART</button></div>
     <div class="group"><label class="field"><span>JANELA</span><select id="window"><option value="40">40 transições</option><option value="80" selected>80 transições</option><option value="160">160 transições</option><option value="320">320 transições</option><option value="0">Captura inteira</option></select></label><button id="zoomOut">−</button><button id="zoomIn">+</button><label class="field"><span>POSIÇÃO</span><input id="position" type="range" min="0" max="0" value="0"></label></div>
     <div class="group"><span class="a">● Fio A</span><span class="b">● Fio B</span></div>
@@ -50,6 +52,12 @@
   <section id="decoderPanel"><div class="decoder-head"><strong>Cosmic Cruiser • UART 57.600 8N1 <span class="live">AUTO</span></strong><span class="hint" id="decoderMeta"></span><label class="field"><span>CANAL</span><select id="decodeWire"><option value="ALL">Fios A + B</option><option value="A">Somente Fio A</option><option value="B">Somente Fio B</option></select></label><label class="field"><span>CAMPO MANUAL</span><select id="decodeOffset"><option value="0">bytes 0–1</option><option value="1">bytes 1–2</option><option value="2">bytes 2–3</option><option value="3">bytes 3–4</option><option value="4" selected>bytes 4–5</option><option value="5">bytes 5–6</option><option value="6">bytes 6–7</option><option value="7">bytes 7–8</option><option value="8">bytes 8–9</option><option value="9">bytes 9–10</option><option value="10">bytes 10–11</option><option value="11">bytes 11–12</option><option value="12">bytes 12–13</option></select></label><label class="field"><span>INTERPRETAÇÃO</span><select id="decodeOrder"><option value="u16le">uint16 LE</option><option value="s16le">int16 LE</option><option value="u16be">uint16 BE</option></select></label><button id="closeDecoder">✕</button></div><div class="decoder-body"><table><thead><tr><th>#</th><th>Fio / padrão</th><th>Tempo</th><th>Bytes</th><th>HEX UART</th><th>Interpretação Cosmic Cruiser</th><th>Campo manual</th><th>CRC</th></tr></thead><tbody id="decodeRows"></tbody></table></div></section>
   </main>
   <script>
+    const sourceSelect = document.getElementById('source');
+    const usbSettings = document.getElementById('usbSettings');
+    const usbA = document.getElementById('usbA'), usbB = document.getElementById('usbB');
+    for (let n=0;n<8;n++) { usbA.add(new Option(`D${n}`,n)); usbB.add(new Option(`D${n}`,n)); }
+    usbB.value='1';
+    usbSettings.style.display='none';
     const input = document.getElementById('file');
     const status = document.getElementById('status');
     const canvas = document.getElementById('scope');
@@ -73,6 +81,7 @@
     const decodeRows = document.getElementById('decodeRows');
     const closeDecoder = document.getElementById('closeDecoder');
     let samples = [];
+    let importedCsv = false;
     let visibleCount = 80;
     let modelVersion = -1;
     let nativeReady = false;
@@ -223,7 +232,7 @@
     function requirePython() {
       if (nativeReady) return true;
       status.className = 'error';
-      status.textContent = 'SEM ACESSO SERIAL: este HTML foi aberto diretamente. Feche esta janela e execute iniciar.command para abrir o aplicativo Python.';
+      status.textContent = 'SEM ACESSO SERIAL: este HTML foi aberto diretamente. Feche esta janela e execute iniciar_logiclab.bat no Windows ou iniciar.command no macOS para abrir o aplicativo Python.';
       return false;
     }
 
@@ -231,12 +240,13 @@
       if (!requirePython()) return;
       try {
         setButtonBusy(refresh, true, '…');
-        const ports = await threadCall('ports');
-        port.innerHTML = '<option value="">Porta serial</option>' + ports.map(p => `<option value="${p.device}">${p.description} — ${p.device}</option>`).join('');
+        const ports = await threadCall('ports',[sourceSelect.value],30000);
+        port.innerHTML = '<option value="">Porta serial</option>' + ports.map(p => `<option value="${escapeHtml(p.device)}">${escapeHtml(p.description)} — ${escapeHtml(p.device)}</option>`).join('');
         const preferred = ports.find(p => /arduino|usbmodem|usbserial/i.test(p.description + ' ' + p.device));
         if (preferred) port.value = preferred.device;
+        else if (ports.length) port.value = ports[0].device;
         status.className = ports.length ? 'ok' : 'error';
-        status.textContent = ports.length ? `${ports.length} porta(s) encontrada(s). Selecionada: ${port.value || 'nenhuma'}` : 'Nenhuma porta serial encontrada. Reconecte o USB e clique em Atualizar portas.';
+        status.textContent = ports.length ? `${ports.length} porta(s) encontrada(s). Selecionada: ${port.value || 'nenhuma'}` : 'Nenhum dispositivo encontrado. Confira USB/driver e clique em Atualizar.';
       } catch (error) {
         status.className = 'error'; status.textContent = `ERRO AO LISTAR PORTAS: ${error.message || error}`;
       } finally { setButtonBusy(refresh, false); }
@@ -248,6 +258,12 @@
       setTimeout(pollPython, 250);
     });
     setTimeout(() => { if (!nativeReady) requirePython(); }, 1200);
+    sourceSelect.addEventListener('change', () => {
+      usbSettings.hidden = sourceSelect.value !== 'usb';
+      usbSettings.style.display = sourceSelect.value === 'usb' ? 'flex' : 'none';
+      port.innerHTML = '<option value="">Selecione o dispositivo</option>';
+      refreshPorts();
+    });
     refresh.addEventListener('click', refreshPorts);
     connect.addEventListener('click', async () => {
       if (!requirePython()) return;
@@ -255,7 +271,7 @@
       if (!connectedState && !port.value) { status.className='error'; status.textContent='Selecione uma porta serial.'; return; }
       controlBusy=true; setButtonBusy(connect,true,connectedState?'Desconectando…':'Conectando…');
       try {
-        const result = connectedState ? await threadCall('disconnect') : await threadCall('connect',[port.value,1000000]);
+        const result = connectedState ? await threadCall('disconnect') : await threadCall('connect',[port.value,1000000],30000);
         status.className = result.ok ? 'ok' : 'error'; status.textContent = result.message;
         if (result.ok) connectedState=!connectedState;
       } catch (error) { status.className='error'; status.textContent=`ERRO DE CONEXÃO: ${error.message || error}`; }
@@ -274,7 +290,7 @@
       status.className='';
       status.textContent=starting?'Iniciando captura…':'Enviando STOP…';
       try {
-        const result = starting ? await threadCall('capture',[true]) : await threadCall('stop_capture');
+        const result = starting ? await threadCall('capture',[true,{samplerate:Number(document.getElementById('usbRate').value),seconds:Number(document.getElementById('usbSeconds').value),channel_a:Number(usbA.value),channel_b:Number(usbB.value)}]) : await threadCall('stop_capture');
         status.className = result.ok ? 'ok' : 'error'; status.textContent = result.message;
         if (!result.ok) capturingState=previousState;
         if (result.ok && !starting) {
@@ -307,14 +323,14 @@
       if (!requirePython() || analysisBusy) return;
       analysisBusy=true; setButtonBusy(exportCsv,true,'Exportando…');
       try {
-        const result = await threadCall('export_csv',[[]],60000);
+        const result = await threadCall('export_csv',[importedCsv ? samples : []],60000);
         status.className=result.ok?'ok':'error'; status.textContent=result.message;
       } catch(error) { status.className='error'; status.textContent=`ERRO AO EXPORTAR CSV: ${error.message || error}`; }
       finally { analysisBusy=false; setButtonBusy(exportCsv,false); }
     });
     async function pollPython() {
       if (!nativeReady || pollBusy) return;
-      if (controlBusy || analysisBusy) { setTimeout(pollPython,300); return; }
+      if (controlBusy) { setTimeout(pollPython,300); return; }
       pollBusy = true;
       try {
         const result = await apiCall('poll',[modelVersion],2500);
@@ -322,17 +338,24 @@
         const wasFinalizing=finalizingState;
         connectedState=Boolean(result.connected); capturingState=Boolean(result.capturing);
         finalizingState=Boolean(result.finalizing);
+        sourceSelect.disabled = connectedState || capturingState || finalizingState;
+        for (const el of usbSettings.querySelectorAll('input,select')) el.disabled=capturingState || finalizingState;
         connect.textContent = connectedState ? 'Desconectar' : 'Conectar';
         capture.disabled=finalizingState;
         capture.textContent = finalizingState ? 'Salvando…' : (capturingState ? 'Parar' : 'Capturar');
         capture.classList.toggle('primary',capturingState);
-        if (result.samples && result.samples.length) {
-          samples = result.samples; visibleCount = Math.min(80, samples.length); updateScroll(true); draw();
+        if (result.samples && (!importedCsv || result.capturing || result.finalizing)) {
+          importedCsv = false;
+          samples = result.samples; updateScroll(true); draw();
           if (modelVersion !== lastDecodedVersion) scheduleAutomaticDecode();
         }
-        if (finalizingState) {
+        if (result.capture_error) {
+          status.className='error'; status.textContent=`Falha na captura USB: ${result.capture_error}`;
+        } else if (result.capture_partial && !capturingState) {
+          status.className='saving'; status.textContent=`Captura USB parcial • dados disponíveis em ${result.saved_path || 'captures'}`;
+        } else if (finalizingState) {
           status.className='saving';
-          status.textContent=`Finalizando captura… ${Number(result.stored_samples || samples.length).toLocaleString('pt-BR')} amostras recebidas • gravando o restante no CSV. Não desconecte o Arduino.`;
+          status.textContent=`Finalizando captura… ${Number(result.stored_samples || samples.length).toLocaleString('pt-BR')} amostras recebidas • gravando o restante no CSV. Não desconecte o dispositivo.`;
         } else if (wasFinalizing && result.saved_path) {
           status.className='ok';
           status.textContent=`CAPTURA CONCLUÍDA • ${Number(result.stored_samples || samples.length).toLocaleString('pt-BR')} amostras • CSV completo salvo em: ${result.saved_path}`;
@@ -340,6 +363,13 @@
           const malformed = Number(result.malformed_samples || 0);
           status.className = malformed ? 'error' : 'ok';
           status.textContent = `CAPTURA: ${Number(result.stored_samples || samples.length).toLocaleString('pt-BR')} amostras no Python • exibindo as ${samples.length.toLocaleString('pt-BR')} mais recentes` + (malformed ? ` • ${malformed} timestamp(s) inválido(s) descartado(s)` : '') + (result.messages.length ? ` • ${result.messages[result.messages.length-1]}` : '');
+        }
+        if (result.usb && result.usb.received_samples && !result.capture_error && !finalizingState) {
+          const u=result.usb;
+          const levels=Array.from({length:8},(_,i)=>`D${i}=${(u.last_bits>>i)&1}`).join(' · ');
+          const active=Array.from({length:8},(_,i)=>i).filter(i=>u.activity_mask&(1<<i)).map(i=>`D${i}`).join(', ');
+          status.className='ok';
+          status.textContent=`USB: ${u.received_samples.toLocaleString('pt-BR')} amostras recebidas${result.capture_partial?' (parcial)':''} • A=D${u.channel_a}, B=D${u.channel_b} • ${levels} • ${active ? 'Atividade detectada: '+active : 'Nenhuma transição detectada nos oito canais; níveis constantes.'}`;
         }
       } catch (error) {
         status.className='error'; status.textContent=`ERRO DE COMUNICAÇÃO: ${error.message || error}`;
@@ -383,10 +413,13 @@
     input.addEventListener('change', async () => {
       const file = input.files[0];
       if (!file) return;
+      if (capturingState || finalizingState) { status.className='error'; status.textContent='Pare a captura antes de importar um CSV.'; input.value=''; return; }
       try {
         status.className='saving'; status.textContent=`Importando ${file.name} em uma thread separada…`;
         const parsed = await parseCsvInWorker(file);
         samples = parsed.samples;
+        importedCsv = true;
+        lastDecodedVersion = -1;
         visibleCount = Math.min(80, samples.length);
         windowSelect.value = '80';
         updateScroll(true);
@@ -483,7 +516,7 @@
       for (let row=0; row<2; row++) {
         const y0=T+row*ph/2, hi=y0+ph*.12, lo=y0+ph*.38;
         ctx.globalAlpha=.45; ctx.strokeStyle='#fff'; [hi,lo].forEach(y=>{ctx.beginPath();ctx.moveTo(L,y);ctx.lineTo(L+pw,y);ctx.stroke()}); ctx.globalAlpha=1;
-        ctx.fillStyle='#fff'; ctx.fillText(row?'FIO B':'FIO A',16,y0+ph*.25); ctx.fillText('1',55,hi+4); ctx.fillText('0',55,lo+4);
+        ctx.fillStyle='#fff'; ctx.fillText((row?'B':'A') + (sourceSelect.value==='usb' ? ' = D'+(row?usbB.value:usbA.value) : ''),8,y0+ph*.25); ctx.fillText('1',55,hi+4); ctx.fillText('0',55,lo+4);
         if (!view.length) continue;
         ctx.strokeStyle=row?'#ff3df2':'#00e5ff'; ctx.lineWidth=3; ctx.beginPath();
         let prev=view[0][row+1], py=prev?hi:lo; ctx.moveTo(L,py);
@@ -491,7 +524,7 @@
         for (let i=1;i<view.length;i++) { const x=L+(view[i][0]-view[0][0])/span*pw, next=view[i][row+1], ny=next?hi:lo; ctx.lineTo(x,py); if(next!==prev)ctx.lineTo(x,ny); prev=next; py=ny; }
         ctx.lineTo(L+pw,py); ctx.stroke();
       }
-      if (!samples.length) { ctx.fillStyle='#aaa'; ctx.font='18px -apple-system,Arial'; ctx.fillText('Selecione um CSV para desenhar o sinal',L+40,h/2); }
+      if (!samples.length) { ctx.fillStyle='#aaa'; ctx.font='18px -apple-system,Arial'; ctx.fillText(capturingState ? 'Aguardando amostras do dispositivo…' : 'Capture um sinal ou importe um CSV',L+40,h/2); }
     }
     addEventListener('resize', draw); draw();
   </script>

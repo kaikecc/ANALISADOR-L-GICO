@@ -25,54 +25,15 @@ o motor durante a inicialização.
 | D19 / RX1 | TX da montagem, anteriormente observado como Fio A |
 | GND | GND da montagem |
 
-## Sensor BNO055 via I²C
+## Comunicação
 
-Não é necessário instalar nenhuma biblioteca externa. O firmware acessa
-diretamente os registradores do BNO055 via I²C e utiliza apenas `Wire`, incluída
-no núcleo padrão do Arduino. No Mega 2560, conecte:
+O USB recebe comandos a 115.200 baud. A montagem utiliza `Serial1` a
+57.600 baud, 8N1. Este firmware controla somente a montagem: não utiliza
+BNO055, RTC ou barramento I²C. Os comandos `BNO`, `RTC` e `RTC SET` foram
+removidos; `QUERY` retorna apenas as posições dos encoders.
 
-| BNO055 | Arduino Mega |
-|---|---|
-| VIN | 5 V somente em breakout compatível; caso contrário, 3,3 V |
-| GND | GND |
-| SDA | D20 / SDA |
-| SCL | D21 / SCL |
-
-O endereço utilizado é `0x28`. A interface recebe rumo, roll, pitch e os quatro
-níveis de calibração (`sistema/giroscópio/acelerômetro/magnetômetro`) cinco vezes
-por segundo. Um nível `3` indica calibração completa daquele componente.
-
-O USB permanece conectado ao computador para receber comandos a 115.200 baud.
-A comunicação com a montagem usa `Serial1` a 57.600 baud, 8N1.
-
-## Relógio DS3231 / HW-84
-
-O RTC compartilha o barramento I²C com o BNO055:
-
-| DS3231 HW-84 | Arduino Mega |
-|---|---|
-| VCC | 5 V |
-| GND | GND |
-| SDA | D20 / SDA |
-| SCL | D21 / SCL |
-
-O endereço é `0x68`. Ao conectar pela interface, o RTC é acertado
-automaticamente com o horário UTC do computador. Os comandos de diagnóstico
-são `RTC` e `RTC SET AAAA MM DD HH MM SS`; o segundo sempre recebe UTC.
-
-## Rastreamento da Lua
-
-A interface está configurada para `27,085263° S, 48,919816° O`. Para iniciar:
-
-1. Conecte e confirme que RTC, posição e BNO055 aparecem na interface.
-2. Use os controles manuais para centralizar a Lua no telescópio.
-3. Com os motores parados, clique em **Alinhar na Lua**.
-4. Clique em **Rastrear Lua**.
-
-O alinhamento calcula os offsets entre as coordenadas celestes e os encoders.
-O rastreamento corrige um eixo por vez a cada cinco segundos. **Parar** ou a
-parada de emergência interrompem o rastreamento e os dois motores. A Lua abaixo
-do horizonte, fora da trava de elevação ou a perda do RTC também causam parada.
+A interface Python ainda possui recursos dependentes desses sensores.
+O rastreamento lunar que exige RTC não está disponível com este firmware.
 
 ## Comandos
 
@@ -102,12 +63,12 @@ HELP
 - `!`: parada de emergência sem precisar enviar newline.
 
 Se a velocidade for omitida, o firmware usa `9`. O `GOTO` consulta as duas
-posições a cada 250 ms e trabalha com tolerância padrão de 0,75°. O resultado
+posições a cada 285 ms e trabalha com tolerância padrão de 0,75°. O resultado
 pode apresentar overshoot.
 
-Somente o valor `9` foi confirmado como velocidade máxima. Os valores `1–8`
-estão disponíveis para investigação, mas são experimentais: ainda não foi
-confirmado se todos são aceitos nem se a ordem é linear.
+O valor `4` foi observado no movimento de azimute da captura
+`Inicializacao-Controle-Montagem-Az.sr`; `9` permanece o padrão das capturas
+anteriores. Os demais valores são experimentais; a escala não foi calibrada.
 
 ## Pacotes implementados
 
@@ -145,3 +106,56 @@ Valores atualmente confirmados:
 
 Antes de usar `GOTO`, valide `QUERY`, movimentos curtos em cada sentido e as
 paradas de cada eixo. Faça os primeiros testes sem telescópio ou carga.
+
+## Diagnóstico de interrupção da comunicação
+
+A recepção serial procura novamente o início do quadro após ruído ou CRC
+inválido e ignora respostas de outros comandos até o prazo da consulta.
+Três consultas de posição consecutivas sem resposta válida durante movimento
+causam envio de parada aos dois eixos. Com a comunicação perdida, o envio não
+garante que a montagem receba a parada.
+
+Após gravar, mantenha consultas `QUERY` por alguns minutos, primeiro parado e
+depois em movimentos curtos. Se falhar, registre as últimas linhas do console:
+`RX1 recebeu 0 bytes` indica
+ausência de resposta UART; bytes recebidos sem quadro válido indicam ruído,
+quadro incompleto ou CRC incorreto. Verifique também se `HELP` ainda responde:
+isso distingue falha da montagem de travamento do programa inteiro.
+
+## Correção baseada nas três capturas de inicialização
+
+Os arquivos `.sr` foram adquiridos a **1 MHz** (metadados), com o analisador
+capaz de 24 MHz. D0 é a resposta da montagem e D1 é o comando do controle.
+Os 133 quadros encontrados nos dois canais têm CRC válido. A análise
+reproduzível e os quadros estão em `analises/inicializacao_sr/`.
+
+No Mega de 16 MHz, o core Arduino AVR 1.8.6 usa uma exceção de compatibilidade
+para `begin(57600)`: modo normal, UBRR=16, efetivamente 58.824 baud (+2,12%).
+O firmware agora configura explicitamente **U2X1=1, UBRR1=34**, resultando em
+57.143 baud (-0,79%). Isso reduz o erro em relação aos 57.600 nominais das
+capturas; não demonstra, sozinho, a causa física do travamento relatado.
+
+A sequência continua `0D → 0B → 80(stop) → 0A → 0E → 80 → 80 → C0 → 81 → C1`.
+Foram ajustados os intervalos 0D/0B para 2.478 ms, 0E/stop para 789 ms,
+consulta de posição para 285 ms e consulta 0A em repouso para 5.085 ms.
+Há um intervalo mínimo global de 6 ms entre inícios de quadros, inclusive
+quando comandos USB chegam juntos. A primeira consulta automática aguarda
+285 ms após iniciar movimento, em vez de depender do horário da consulta anterior.
+
+Movimentos só são liberados após respostas 0A e 0E com CRC válido. Se a
+inicialização falhar, não são enviadas as referências 81/C1. Três falhas de
+posição bloqueiam novos movimentos; se houver movimento, enviam parada.
+`STOP` e `!` continuam disponíveis mesmo com o movimento bloqueado.
+
+O novo comando **`INIT`** para os motores e repete a inicialização sem gerar
+outro pulso baixo no TX. Ele redefine as referências dos encoders (81/C1);
+não é uma recuperação transparente de posição. Não é executado automaticamente.
+
+### Validação na montagem
+
+Compile e grave para Arduino Mega 2560. Confira `0A OK | 0E OK` no console;
+se houver `SEM RESPOSTA`, o firmware mantém o movimento bloqueado.
+Teste `QUERY`, depois um movimento curto `AZ POS 4` seguido de `STOP`,
+e novamente `QUERY`. Capture D18/D19 para comparar os quadros e verificar
+se a comunicação permanece ativa. A compilação e análise offline não
+substituem esse teste físico; o firmware não foi gravado automaticamente.

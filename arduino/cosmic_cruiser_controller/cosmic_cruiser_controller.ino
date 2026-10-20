@@ -11,9 +11,9 @@
  * movimento após comando explícito.
  */
 
+
 #include <Arduino.h>
 #include <math.h>
-#include <Wire.h>
 
 constexpr uint32_t USB_BAUD = 115200;
 constexpr uint32_t MOUNT_BAUD = 57600;
@@ -21,37 +21,24 @@ constexpr uint8_t FRAME_SIZE = 14;
 constexpr uint32_t COUNTS_PER_TURN = 1673280UL;
 constexpr float COUNTS_PER_DEGREE = 4648.0f;
 constexpr uint8_t CONFIRMED_MAX_SPEED = 0x09;
-constexpr uint32_t QUERY_INTERVAL_MS = 250;
+constexpr uint32_t QUERY_INTERVAL_MS = 285;
 constexpr uint32_t RESPONSE_TIMEOUT_MS = 80;
 constexpr uint8_t MOUNT_TX_PIN = 18;
-constexpr uint16_t STARTUP_TX_LOW_MS = 250;
-constexpr uint16_t STARTUP_IDLE_TO_0D_MS = 1797;
-constexpr uint16_t STARTUP_0D_TO_0B_MS = 2475;
+// Intervalos entre inicios de quadros nas tres capturas Inicializacao-*.sr (1 MHz).
+constexpr uint16_t STARTUP_TX_LOW_MS = 288;
+constexpr uint16_t STARTUP_IDLE_TO_0D_MS = 1799;
+constexpr uint16_t STARTUP_0D_TO_0B_MS = 2478;
 constexpr uint8_t STARTUP_SHORT_GAP_MS = 12;
 constexpr uint16_t STARTUP_0A_TO_0E_MS = 126;
-constexpr uint16_t STARTUP_0E_TO_STOP_MS = 788;
+constexpr uint16_t STARTUP_0E_TO_STOP_MS = 789;
 constexpr uint8_t STARTUP_DOUBLE_STOP_MS = 6;
 constexpr uint8_t STARTUP_STOP_TO_C0_MS = 18;
 constexpr uint8_t STARTUP_AXIS_CONFIG_MS = 6;
 constexpr uint8_t STARTUP_RESPONSE_TIMEOUT_MS = 100;
-constexpr uint16_t STARTUP_KEEPALIVE_MS = 5079;
+constexpr uint16_t STARTUP_KEEPALIVE_MS = 5085;
 constexpr uint32_t MOTION_TIMEOUT_MS = 240000UL;
 constexpr float DEFAULT_TOLERANCE_DEG = 0.75f;
-constexpr uint32_t BNO_INTERVAL_MS = 200;
-constexpr uint8_t BNO_ADDRESS = 0x28;
-constexpr uint8_t BNO_CHIP_ID_REG = 0x00;
-constexpr uint8_t BNO_CHIP_ID = 0xA0;
-constexpr uint8_t BNO_EULER_H_LSB_REG = 0x1A;
-constexpr uint8_t BNO_CALIB_STAT_REG = 0x35;
-constexpr uint8_t BNO_UNIT_SEL_REG = 0x3B;
-constexpr uint8_t BNO_OPR_MODE_REG = 0x3D;
-constexpr uint8_t BNO_PWR_MODE_REG = 0x3E;
-constexpr uint8_t BNO_SYS_TRIGGER_REG = 0x3F;
-constexpr uint8_t BNO_PAGE_ID_REG = 0x07;
-constexpr uint8_t BNO_MODE_CONFIG = 0x00;
-constexpr uint8_t BNO_MODE_NDOF = 0x0C;
-constexpr uint8_t RTC_ADDRESS = 0x68;
-
+constexpr uint8_t MAX_POSITION_FAILURES = 3;
 enum Axis : uint8_t {
   AZIMUTH,
   ELEVATION,
@@ -83,15 +70,28 @@ uint32_t targetCounts = 0;
 uint32_t motionStartedAt = 0;
 uint32_t lastQueryAt = 0;
 uint32_t lastStartupKeepaliveAt = 0;
-uint32_t lastBnoAt = 0;
 uint16_t lastMountRxBytes = 0;
 bool lastMountHadBadCrc = false;
 bool startupSequenceSent = false;
+bool mountReady = false;
+bool hasTransmitted = false;
+uint32_t lastFrameStartedUs = 0;
+// Menor intervalo observado: 5,885 ms. Inclui os ~2,43 ms do quadro.
+constexpr uint32_t MIN_FRAME_INTERVAL_US = 6000;
+
+void beginMountSerial() {
+  Serial1.begin(MOUNT_BAUD, SERIAL_8N1);
+#if defined(__AVR_ATmega2560__) && F_CPU == 16000000UL
+  // O core AVR aplica a excecao de bootloader de 57600 tambem a Serial1:
+  // UBRR=16, modo normal -> 58824 baud (+2,12%). U2X/34 -> 57143 (-0,79%).
+  UCSR1A = _BV(U2X1);
+  UBRR1H = 0;
+  UBRR1L = 34;
+#endif
+}
 char consoleLine[80];
 uint8_t consoleLength = 0;
-bool bnoAvailable = false;
-uint8_t bnoReadFailures = 0;
-bool rtcAvailable = false;
+uint8_t positionFailures = 0;
 
 const __FlashStringHelper *axisName(Axis axis) {
   return axis == AZIMUTH ? F("AZIMUTE") : F("ELEVACAO");
@@ -121,6 +121,11 @@ void sendFrame(uint8_t frame[FRAME_SIZE]) {
   const uint16_t crc = crc16Kermit(frame, FRAME_SIZE - 2);
   frame[12] = crc & 0xFF;
   frame[13] = crc >> 8;
+  if (hasTransmitted) {
+    while (micros() - lastFrameStartedUs < MIN_FRAME_INTERVAL_US) delayMicroseconds(20);
+  }
+  lastFrameStartedUs = micros();
+  hasTransmitted = true;
   Serial1.write(frame, FRAME_SIZE);
   Serial1.flush();
 }
@@ -130,8 +135,8 @@ void sendPositionQuery() {
     0x01, 0x01, 0x00, 0x09,
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0
   };
-  sendFrame(frame);
   lastQueryAt = millis();
+  sendFrame(frame);
 }
 
 void sendStartupRequest(uint8_t command) {
@@ -212,31 +217,32 @@ int32_t shortestPositionError(uint32_t target, uint32_t current) {
   return error;
 }
 
-bool readMountFrame(uint8_t frame[FRAME_SIZE], uint32_t timeoutMs) {
+bool readMountFrame(uint8_t frame[FRAME_SIZE], uint32_t timeoutMs,
+                    uint8_t expectedCommand) {
   uint8_t index = 0;
   lastMountRxBytes = 0;
   lastMountHadBadCrc = false;
   const uint32_t started = millis();
   while (millis() - started < timeoutMs) {
-    while (Serial1.available()) {
+    while (Serial1.available() && millis() - started < timeoutMs) {
       const uint8_t value = Serial1.read();
       ++lastMountRxBytes;
-      if (index == 0 && value != 0x01) continue;
-      if (index == 1 && value != 0x01) {
-        index = value == 0x01 ? 1 : 0;
-        continue;
-      }
-      if (index == 2 && value != 0x00) {
-        index = 0;
-        continue;
-      }
       frame[index++] = value;
       if (index == FRAME_SIZE) {
-        const uint16_t expected = crc16Kermit(frame, FRAME_SIZE - 2);
-        const uint16_t received = frame[12] | (frame[13] << 8);
-        if (expected == received) return true;
-        lastMountHadBadCrc = true;
-        index = 0;
+        if (frame[0] == 0x01 && frame[1] == 0x01 && frame[2] == 0x00) {
+          const uint16_t expected = crc16Kermit(frame, FRAME_SIZE - 2);
+          const uint16_t received = static_cast<uint16_t>(frame[12]) |
+                                   (static_cast<uint16_t>(frame[13]) << 8);
+          if (expected == received) {
+            if (frame[3] == expectedCommand) return true;
+            index = 0;
+            continue;  // Aguarde a resposta solicitada dentro do mesmo prazo.
+          }
+          lastMountHadBadCrc = true;
+        }
+        // Janela deslizante: preserve um cabecalho que comece dentro do ruido.
+        memmove(frame, frame + 1, FRAME_SIZE - 1);
+        index = FRAME_SIZE - 1;
       }
     }
   }
@@ -249,16 +255,14 @@ void waitFrom(uint32_t startedAt, uint32_t intervalMs) {
 
 bool readStartupResponse(uint8_t expectedCommand, uint32_t timeoutMs) {
   uint8_t frame[FRAME_SIZE];
-  const uint32_t startedAt = millis();
-  while (millis() - startedAt < timeoutMs) {
-    const uint32_t remaining = timeoutMs - (millis() - startedAt);
-    if (!readMountFrame(frame, remaining)) return false;
-    if (frame[3] == expectedCommand) return true;
-  }
-  return false;
+  return readMountFrame(frame, timeoutMs, expectedCommand);
 }
 
 void initializeMountProtocol(uint32_t txIdleStartedAt) {
+  mountReady = false;
+  startupSequenceSent = false;
+  azimuth.valid = elevation.valid = false;
+  positionFailures = 0;
   Serial.println(F("MONTAGEM: reproduzindo inicializacao do controle"));
   waitFrom(txIdleStartedAt, STARTUP_IDLE_TO_0D_MS);
   while (Serial1.available()) Serial1.read();
@@ -301,18 +305,26 @@ void initializeMountProtocol(uint32_t txIdleStartedAt) {
   sendAxisStop(ELEVATION);
   waitFrom(elevationStopAt, STARTUP_AXIS_CONFIG_MS);
 
+  Serial.print(F("MONTAGEM: 0A "));
+  Serial.print(response0A ? F("OK") : F("SEM RESPOSTA"));
+  Serial.print(F(" | 0E "));
+  Serial.println(response0E ? F("OK") : F("SEM RESPOSTA"));
+
+  // Nao redefina referencias se a montagem nao confirmou o handshake.
+  if (!response0A || !response0E) {
+    Serial.println(F("MONTAGEM: inicializacao falhou; movimento bloqueado. Use INIT para tentar novamente."));
+    return;
+  }
+
   const uint32_t command81At = millis();
   sendStartupRequest(0x81);
   waitFrom(command81At, STARTUP_AXIS_CONFIG_MS);
   sendStartupElevationReference();
 
   startupSequenceSent = true;
+  mountReady = true;
   lastStartupKeepaliveAt = millis();
-  Serial.print(F("MONTAGEM: 0A "));
-  Serial.print(response0A ? F("OK") : F("SEM RESPOSTA"));
-  Serial.print(F(" | 0E "));
-  Serial.println(response0E ? F("OK") : F("SEM RESPOSTA"));
-  Serial.println(F("MONTAGEM: comandos liberados independentemente das respostas"));
+  Serial.println(F("MONTAGEM: comunicacao confirmada; comandos liberados"));
 }
 
 void serviceStartupKeepalive() {
@@ -322,98 +334,6 @@ void serviceStartupKeepalive() {
   lastStartupKeepaliveAt = millis();
   sendStartupRequest(0x0A);
   readStartupResponse(0x0A, STARTUP_RESPONSE_TIMEOUT_MS);
-}
-
-uint8_t bcdToBinary(uint8_t value) {
-  return value - 6 * (value >> 4);
-}
-
-uint8_t binaryToBcd(uint8_t value) {
-  return value + 6 * (value / 10);
-}
-
-bool rtcReadRegisters(uint8_t reg, uint8_t *data, uint8_t length) {
-  Wire.beginTransmission(RTC_ADDRESS);
-  Wire.write(reg);
-  if (Wire.endTransmission(false) != 0) return false;
-  if (Wire.requestFrom(RTC_ADDRESS, length) != length) {
-    while (Wire.available()) Wire.read();
-    return false;
-  }
-  for (uint8_t index = 0; index < length; ++index) {
-    data[index] = Wire.read();
-  }
-  return true;
-}
-
-bool rtcWriteUtc(
-  uint16_t year, uint8_t month, uint8_t day,
-  uint8_t hour, uint8_t minute, uint8_t second
-) {
-  if (year < 2000 || year > 2099 || month < 1 || month > 12 ||
-      day < 1 || day > 31 || hour > 23 || minute > 59 || second > 59) {
-    return false;
-  }
-  Wire.beginTransmission(RTC_ADDRESS);
-  Wire.write(0x00);
-  Wire.write(binaryToBcd(second));
-  Wire.write(binaryToBcd(minute));
-  Wire.write(binaryToBcd(hour));
-  Wire.write(binaryToBcd(1));  // Dia da semana nao e usado.
-  Wire.write(binaryToBcd(day));
-  Wire.write(binaryToBcd(month));
-  Wire.write(binaryToBcd(year - 2000));
-  if (Wire.endTransmission() != 0) return false;
-
-  // Limpe OSF (Oscillator Stop Flag) depois de acertar o relogio.
-  uint8_t status = 0;
-  if (rtcReadRegisters(0x0F, &status, 1)) {
-    Wire.beginTransmission(RTC_ADDRESS);
-    Wire.write(0x0F);
-    Wire.write(status & ~0x80);
-    Wire.endTransmission();
-  }
-  rtcAvailable = true;
-  return true;
-}
-
-bool printRtcUtc() {
-  uint8_t data[7];
-  uint8_t status = 0;
-  if (!rtcReadRegisters(0x00, data, sizeof(data)) ||
-      !rtcReadRegisters(0x0F, &status, 1)) {
-    rtcAvailable = false;
-    Serial.println(F("RTC: INDISPONIVEL"));
-    return false;
-  }
-  const uint8_t second = bcdToBinary(data[0] & 0x7F);
-  const uint8_t minute = bcdToBinary(data[1] & 0x7F);
-  const uint8_t hour = bcdToBinary(data[2] & 0x3F);
-  const uint8_t day = bcdToBinary(data[4] & 0x3F);
-  const uint8_t month = bcdToBinary(data[5] & 0x1F);
-  const uint16_t year = 2000 + bcdToBinary(data[6]);
-  rtcAvailable = true;
-
-  Serial.print(F("RTC UTC: "));
-  Serial.print(year);
-  Serial.print('-');
-  if (month < 10) Serial.print('0');
-  Serial.print(month);
-  Serial.print('-');
-  if (day < 10) Serial.print('0');
-  Serial.print(day);
-  Serial.print('T');
-  if (hour < 10) Serial.print('0');
-  Serial.print(hour);
-  Serial.print(':');
-  if (minute < 10) Serial.print('0');
-  Serial.print(minute);
-  Serial.print(':');
-  if (second < 10) Serial.print('0');
-  Serial.print(second);
-  Serial.print(F("Z OSF="));
-  Serial.println((status & 0x80) ? 1 : 0);
-  return (status & 0x80) == 0;
 }
 
 void printPositions() {
@@ -428,120 +348,18 @@ void printPositions() {
   Serial.println(F(" graus"));
 }
 
-bool bnoWrite8(uint8_t reg, uint8_t value) {
-  Wire.beginTransmission(BNO_ADDRESS);
-  Wire.write(reg);
-  Wire.write(value);
-  return Wire.endTransmission() == 0;
-}
-
-bool bnoRead(uint8_t reg, uint8_t *data, uint8_t length) {
-  Wire.beginTransmission(BNO_ADDRESS);
-  Wire.write(reg);
-  if (Wire.endTransmission(false) != 0) return false;
-  const uint8_t received = Wire.requestFrom(BNO_ADDRESS, length);
-  if (received != length) {
-    while (Wire.available()) Wire.read();
-    return false;
-  }
-  for (uint8_t index = 0; index < length; ++index) {
-    data[index] = Wire.read();
-  }
-  return true;
-}
-
-bool bnoRead8(uint8_t reg, uint8_t &value) {
-  return bnoRead(reg, &value, 1);
-}
-
-bool beginBno() {
-  uint8_t chipId = 0;
-  if (!bnoRead8(BNO_CHIP_ID_REG, chipId) || chipId != BNO_CHIP_ID) {
-    delay(700);
-    if (!bnoRead8(BNO_CHIP_ID_REG, chipId) || chipId != BNO_CHIP_ID) {
-      return false;
-    }
-  }
-
-  // Use o oscilador interno. Muitos módulos econômicos não possuem cristal
-  // externo, embora aceitem o comando que o seleciona.
-  if (!bnoWrite8(BNO_OPR_MODE_REG, BNO_MODE_CONFIG)) return false;
-  delay(25);
-  if (!bnoWrite8(BNO_SYS_TRIGGER_REG, 0x20)) return false;
-  delay(700);
-  if (!bnoRead8(BNO_CHIP_ID_REG, chipId) || chipId != BNO_CHIP_ID) return false;
-  if (!bnoWrite8(BNO_PWR_MODE_REG, 0x00)) return false;
-  delay(10);
-  if (!bnoWrite8(BNO_PAGE_ID_REG, 0x00)) return false;
-  if (!bnoWrite8(BNO_UNIT_SEL_REG, 0x00)) return false;
-  if (!bnoWrite8(BNO_SYS_TRIGGER_REG, 0x00)) return false;
-  if (!bnoWrite8(BNO_OPR_MODE_REG, BNO_MODE_NDOF)) return false;
-  delay(25);
-  return true;
-}
-
-int16_t bnoInt16(const uint8_t *data) {
-  return static_cast<int16_t>(
-    static_cast<uint16_t>(data[0]) |
-    (static_cast<uint16_t>(data[1]) << 8)
-  );
-}
-
-void printBnoOrientation() {
-  if (!bnoAvailable) {
-    Serial.println(F("BNO: INDISPONIVEL"));
-    return;
-  }
-  uint8_t euler[6];
-  uint8_t calibration = 0;
-  if (!bnoRead(BNO_EULER_H_LSB_REG, euler, sizeof(euler)) ||
-      !bnoRead8(BNO_CALIB_STAT_REG, calibration)) {
-    if (bnoReadFailures < 255) ++bnoReadFailures;
-    Serial.print(F("BNO: ERRO I2C "));
-    Serial.println(bnoReadFailures);
-    if (bnoReadFailures >= 5) {
-      Serial.println(F("BNO: reinicializando"));
-      bnoAvailable = beginBno();
-      bnoReadFailures = 0;
-    }
-    return;
-  }
-  bnoReadFailures = 0;
-  const float heading = bnoInt16(&euler[0]) / 16.0f;
-  const float roll = bnoInt16(&euler[2]) / 16.0f;
-  const float pitch = bnoInt16(&euler[4]) / 16.0f;
-  const uint8_t system = (calibration >> 6) & 0x03;
-  const uint8_t gyro = (calibration >> 4) & 0x03;
-  const uint8_t accelerometer = (calibration >> 2) & 0x03;
-  const uint8_t magnetometer = calibration & 0x03;
-  Serial.print(F("BNO: heading "));
-  Serial.print(heading, 2);
-  Serial.print(F(" roll "));
-  Serial.print(roll, 2);
-  Serial.print(F(" pitch "));
-  Serial.print(pitch, 2);
-  Serial.print(F(" CAL sys "));
-  Serial.print(system);
-  Serial.print(F(" gyro "));
-  Serial.print(gyro);
-  Serial.print(F(" accel "));
-  Serial.print(accelerometer);
-  Serial.print(F(" mag "));
-  Serial.println(magnetometer);
-}
-
-void serviceBno() {
-  if (!bnoAvailable) return;
-  if (millis() - lastBnoAt < BNO_INTERVAL_MS) return;
-  lastBnoAt = millis();
-  printBnoOrientation();
-}
-
 bool updatePositions() {
   while (Serial1.available()) Serial1.read();
   sendPositionQuery();
   uint8_t frame[FRAME_SIZE];
-  if (!readMountFrame(frame, RESPONSE_TIMEOUT_MS)) {
+  if (!readMountFrame(frame, RESPONSE_TIMEOUT_MS, 0x09)) {
+    azimuth.valid = elevation.valid = false;
+    if (positionFailures < MAX_POSITION_FAILURES) ++positionFailures;
+    if (positionFailures >= MAX_POSITION_FAILURES) {
+      if (motionMode != IDLE) stopAll(F("perda de comunicacao com a montagem"));
+      mountReady = false;
+      startupSequenceSent = false;
+    }
     if (lastMountRxBytes == 0) {
       Serial.println(F("AVISO: montagem sem resposta; RX1 recebeu 0 bytes"));
     } else {
@@ -552,10 +370,7 @@ bool updatePositions() {
     }
     return false;
   }
-  if (frame[3] != 0x09) {
-    Serial.println(F("AVISO: resposta nao e de posicao"));
-    return false;
-  }
+  positionFailures = 0;
 
   // Resposta confirmada:
   // bytes 4–6 = azimute; bytes 8–10 = elevação.
@@ -577,14 +392,21 @@ bool validSpeed(int speed) {
 }
 
 void printSpeedWarning(uint8_t speed) {
-  if (speed != CONFIRMED_MAX_SPEED) {
+  if (speed != CONFIRMED_MAX_SPEED && speed != 4) {
     Serial.print(F("ATENCAO: velocidade 0x"));
     Serial.print(speed, HEX);
-    Serial.println(F(" e experimental; somente 0x09 foi confirmada."));
+    Serial.println(F(" e experimental; 0x04 e 0x09 foram observadas."));
   }
 }
 
+bool requireMountReady() {
+  if (mountReady) return true;
+  Serial.println(F("ERRO: montagem indisponivel; use INIT e confira as respostas 0A/0E"));
+  return false;
+}
+
 void beginManual(Axis axis, Direction direction, uint8_t speed) {
+  if (!requireMountReady()) return;
   // A montagem observada para o outro eixo antes de iniciar o escolhido.
   sendAxisStop(axis == AZIMUTH ? ELEVATION : AZIMUTH);
   delay(8);
@@ -594,6 +416,8 @@ void beginManual(Axis axis, Direction direction, uint8_t speed) {
   activeSpeed = speed;
   motionMode = MANUAL;
   motionStartedAt = millis();
+  lastQueryAt = motionStartedAt;
+  positionFailures = 0;
   printSpeedWarning(speed);
   Serial.print(F("MOVIMENTO: "));
   Serial.print(axisName(axis));
@@ -603,6 +427,7 @@ void beginManual(Axis axis, Direction direction, uint8_t speed) {
 }
 
 void beginGoto(Axis axis, float targetDegrees, uint8_t speed) {
+  if (!requireMountReady()) return;
   if (!updatePositions()) {
     Serial.println(F("GOTO cancelado: posicao indisponivel"));
     return;
@@ -625,6 +450,8 @@ void beginGoto(Axis axis, float targetDegrees, uint8_t speed) {
   sendAxisMotion(axis, activeDirection, speed);
   motionMode = GOTO_POSITION;
   motionStartedAt = millis();
+  lastQueryAt = motionStartedAt;
+  positionFailures = 0;
   printSpeedWarning(speed);
   Serial.print(F("GOTO "));
   Serial.print(axisName(axis));
@@ -660,10 +487,7 @@ void serviceMotion() {
 void printHelp() {
   Serial.println(F(""));
   Serial.println(F("Comandos:"));
-  Serial.println(F("  QUERY"));
-  Serial.println(F("  BNO"));
-  Serial.println(F("  RTC"));
-  Serial.println(F("  RTC SET <AAAA> <MM> <DD> <HH> <MM> <SS>  (UTC)"));
+  Serial.println(F("  QUERY | INIT (reinicializa com motores parados)"));
   Serial.println(F("  AZ POS [1-9]       | AZ NEG [1-9]"));
   Serial.println(F("  ALT POS [1-9]      | ALT NEG [1-9]"));
   Serial.println(F("  AZ GOTO <graus> [1-9]"));
@@ -672,7 +496,7 @@ void printHelp() {
   Serial.println(F("  STOP               | ! (emergencia)"));
   Serial.println(F("  HELP"));
   Serial.println(F(""));
-  Serial.println(F("Velocidade 9 = maxima confirmada; 1-8 = experimentais."));
+  Serial.println(F("Velocidades 4 e 9 observadas; demais experimentais."));
 }
 
 bool parseAxis(const char *token, Axis &axis) {
@@ -699,35 +523,11 @@ void executeConsoleCommand() {
 
   if (strcmp(first, "STOP") == 0) {
     stopAll(F("comando do usuario"));
+  } else if (strcmp(first, "INIT") == 0) {
+    stopAll(F("reinicializacao solicitada"));
+    initializeMountProtocol(millis());
   } else if (strcmp(first, "QUERY") == 0) {
     updatePositions();
-    printBnoOrientation();
-  } else if (strcmp(first, "BNO") == 0) {
-    printBnoOrientation();
-  } else if (strcmp(first, "RTC") == 0) {
-    char *action = strtok_r(nullptr, " ", &save);
-    if (!action) {
-      printRtcUtc();
-    } else if (strcmp(action, "SET") == 0) {
-      char *fields[6];
-      bool complete = true;
-      for (uint8_t index = 0; index < 6; ++index) {
-        fields[index] = strtok_r(nullptr, " ", &save);
-        if (!fields[index]) complete = false;
-      }
-      if (!complete) {
-        Serial.println(F("ERRO: RTC SET AAAA MM DD HH MM SS"));
-      } else if (rtcWriteUtc(
-                   atoi(fields[0]), atoi(fields[1]), atoi(fields[2]),
-                   atoi(fields[3]), atoi(fields[4]), atoi(fields[5]))) {
-        Serial.println(F("RTC: AJUSTADO EM UTC"));
-        printRtcUtc();
-      } else {
-        Serial.println(F("ERRO: falha ao ajustar RTC"));
-      }
-    } else {
-      Serial.println(F("ERRO: use RTC ou RTC SET AAAA MM DD HH MM SS"));
-    }
   } else if (strcmp(first, "HELP") == 0) {
     printHelp();
   } else {
@@ -801,27 +601,18 @@ void setup() {
   Serial.begin(USB_BAUD);
 
   // O controle original mantem o fio B baixo durante a entrada em operacao,
-  // depois o leva ao nivel ocioso alto e inicia os quadros 1,797 s mais tarde.
+  // depois o leva ao nivel ocioso alto e inicia os quadros ~1,799 s mais tarde.
   pinMode(MOUNT_TX_PIN, OUTPUT);
   digitalWrite(MOUNT_TX_PIN, LOW);
   delay(STARTUP_TX_LOW_MS);
   digitalWrite(MOUNT_TX_PIN, HIGH);
-  Serial1.begin(MOUNT_BAUD, SERIAL_8N1);
+  beginMountSerial();
   const uint32_t txIdleStartedAt = millis();
 
-  Wire.begin();
-  Wire.setClock(100000UL);
-  rtcAvailable = printRtcUtc();
   motionMode = IDLE;
   initializeMountProtocol(txIdleStartedAt);
 
-  bnoAvailable = beginBno();
-  if (bnoAvailable) {
-    Serial.println(F("BNO055 pronto no I2C 0x28 (registradores diretos)"));
-  } else {
-    Serial.println(F("AVISO: BNO055 nao encontrado no I2C 0x28"));
-  }
-  Serial.println(F("Cosmic Cruiser AZ/ALT Controller pronto; motores PARADOS"));
+  Serial.println(F("Cosmic Cruiser AZ/ALT: console pronto; verifique status da montagem acima"));
   printHelp();
 }
 
@@ -829,5 +620,4 @@ void loop() {
   pollConsole();
   serviceMotion();
   serviceStartupKeepalive();
-  serviceBno();
 }
