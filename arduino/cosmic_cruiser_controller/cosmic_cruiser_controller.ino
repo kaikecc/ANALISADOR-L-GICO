@@ -14,6 +14,7 @@
 
 #include <Arduino.h>
 #include <math.h>
+#include "sensors.h"
 
 constexpr uint32_t USB_BAUD = 115200;
 constexpr uint32_t MOUNT_BAUD = 57600;
@@ -38,6 +39,8 @@ constexpr uint8_t STARTUP_RESPONSE_TIMEOUT_MS = 100;
 constexpr uint16_t STARTUP_KEEPALIVE_MS = 5085;
 constexpr uint32_t MOTION_TIMEOUT_MS = 240000UL;
 constexpr float DEFAULT_TOLERANCE_DEG = 0.75f;
+constexpr float TRACK_TOLERANCE_DEG = 1.0f / 60.0f;
+float activeToleranceDeg = DEFAULT_TOLERANCE_DEG;
 constexpr uint8_t MAX_POSITION_FAILURES = 3;
 enum Axis : uint8_t {
   AZIMUTH,
@@ -426,7 +429,7 @@ void beginManual(Axis axis, Direction direction, uint8_t speed) {
   Serial.println(speed, HEX);
 }
 
-void beginGoto(Axis axis, float targetDegrees, uint8_t speed) {
+void beginGoto(Axis axis, float targetDegrees, uint8_t speed, bool tracking = false) {
   if (!requireMountReady()) return;
   if (!updatePositions()) {
     Serial.println(F("GOTO cancelado: posicao indisponivel"));
@@ -434,9 +437,10 @@ void beginGoto(Axis axis, float targetDegrees, uint8_t speed) {
   }
   AxisState &state = axisState(axis);
   targetCounts = degreesToCounts(targetDegrees);
+  activeToleranceDeg = tracking ? TRACK_TOLERANCE_DEG : DEFAULT_TOLERANCE_DEG;
   const int32_t error = shortestPositionError(targetCounts, state.position);
   const int32_t tolerance =
-    static_cast<int32_t>(DEFAULT_TOLERANCE_DEG * COUNTS_PER_DEGREE);
+    static_cast<int32_t>(activeToleranceDeg * COUNTS_PER_DEGREE);
   if (abs(error) <= tolerance) {
     Serial.println(F("GOTO: eixo ja esta dentro da tolerancia"));
     return;
@@ -474,7 +478,7 @@ void serviceMotion() {
   const AxisState &state = axisState(activeAxis);
   const int32_t error = shortestPositionError(targetCounts, state.position);
   const int32_t tolerance =
-    static_cast<int32_t>(DEFAULT_TOLERANCE_DEG * COUNTS_PER_DEGREE);
+    static_cast<int32_t>(activeToleranceDeg * COUNTS_PER_DEGREE);
   const Direction requiredDirection = error > 0 ? POSITIVE : NEGATIVE;
   if (abs(error) <= tolerance || requiredDirection != activeDirection) {
     stopOneAxis(activeAxis, F("alvo atingido"));
@@ -487,6 +491,7 @@ void serviceMotion() {
 void printHelp() {
   Serial.println(F(""));
   Serial.println(F("Comandos:"));
+  Serial.println(F("TRACK_ARCMIN=1 | AZ/ALT TRACK <graus> [1-9] | tolerancia 1 arcmin"));
   Serial.println(F("  QUERY | INIT (reinicializa com motores parados)"));
   Serial.println(F("  AZ POS [1-9]       | AZ NEG [1-9]"));
   Serial.println(F("  ALT POS [1-9]      | ALT NEG [1-9]"));
@@ -494,6 +499,7 @@ void printHelp() {
   Serial.println(F("  ALT GOTO <graus> [1-9]"));
   Serial.println(F("  AZ STOP            | ALT STOP"));
   Serial.println(F("  STOP               | ! (emergencia)"));
+  Serial.println(F("  BNO | RTC | RTC SET ano mes dia hora minuto segundo (UTC)"));
   Serial.println(F("  HELP"));
   Serial.println(F(""));
   Serial.println(F("Velocidades 4 e 9 observadas; demais experimentais."));
@@ -528,6 +534,10 @@ void executeConsoleCommand() {
     initializeMountProtocol(millis());
   } else if (strcmp(first, "QUERY") == 0) {
     updatePositions();
+  } else if (strcmp(first, "BNO") == 0) {
+    printBno();
+  } else if (strcmp(first, "RTC") == 0) {
+    rtcCommand(save);
   } else if (strcmp(first, "HELP") == 0) {
     printHelp();
   } else {
@@ -557,7 +567,7 @@ void executeConsoleCommand() {
         beginManual(axis, strcmp(action, "POS") == 0 ? POSITIVE : NEGATIVE,
                     static_cast<uint8_t>(speed));
       }
-    } else if (strcmp(action, "GOTO") == 0) {
+    } else if (strcmp(action, "GOTO") == 0 || strcmp(action, "TRACK") == 0) {
       char *degreesText = strtok_r(nullptr, " ", &save);
       char *speedText = strtok_r(nullptr, " ", &save);
       if (!degreesText) {
@@ -570,7 +580,7 @@ void executeConsoleCommand() {
         } else if (!validSpeed(speed)) {
           Serial.println(F("ERRO: velocidade deve estar entre 1 e 9"));
         } else {
-          beginGoto(axis, degrees, static_cast<uint8_t>(speed));
+          beginGoto(axis, degrees, static_cast<uint8_t>(speed), strcmp(action, "TRACK") == 0);
         }
       }
     } else {
@@ -611,6 +621,9 @@ void setup() {
 
   motionMode = IDLE;
   initializeMountProtocol(txIdleStartedAt);
+  beginSensors();
+  printBno();
+  printRtc();
 
   Serial.println(F("Cosmic Cruiser AZ/ALT: console pronto; verifique status da montagem acima"));
   printHelp();
@@ -620,4 +633,5 @@ void loop() {
   pollConsole();
   serviceMotion();
   serviceStartupKeepalive();
+  serviceSensors();
 }

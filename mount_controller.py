@@ -35,11 +35,15 @@ RTC_RE = re.compile(
     r"RTC UTC:\s*(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)\s+OSF=(\d)",
     re.IGNORECASE,
 )
+RTC_LOCAL_RE = re.compile(
+    r"^Blumenau\s*\|\s*(\d{2}/\d{2}/\d{4} \d{2}:\d{2}:\d{2}) BRT$"
+)
 
 OBSERVER_LATITUDE = -27.085263
 OBSERVER_LONGITUDE = -48.919816
-MOON_UPDATE_SECONDS = 5.0
-MOON_TOLERANCE_DEGREES = 0.80
+MOON_UPDATE_SECONDS = 1.0
+MOON_TOLERANCE_ARCMIN = 2.0
+MOON_TOLERANCE_DEGREES = MOON_TOLERANCE_ARCMIN / 60.0
 
 
 def _normalize_degrees(value: float) -> float:
@@ -214,6 +218,9 @@ class MountControllerAPI:
         }
         self.rtc_datetime: datetime | None = None
         self.rtc_updated_at: float | None = None
+        self.rtc_protocol = "utc"
+        self.rtc_local_sync_pending = False
+        self.rtc_sync_deadline = 0.0
         self.moon = {
             "tracking": False,
             "aligned": False,
@@ -229,6 +236,7 @@ class MountControllerAPI:
         }
         self.tracking_stop = threading.Event()
         self.tracking_thread: threading.Thread | None = None
+        self.fine_tracking_supported = False
         self.sequence = 0
 
     def _event(self, text: str, level: str = "info") -> None:
@@ -297,14 +305,13 @@ class MountControllerAPI:
                 daemon=True,
             )
             self.reader_thread.start()
-            now = datetime.now(timezone.utc)
-            self._send_line(
-                f"RTC SET {now.year} {now.month} {now.day} "
-                f"{now.hour} {now.minute} {now.second}"
-            )
+            self.sync_rtc()
             time.sleep(0.05)
+            self._send_raw(b"!\n")
             self._send_line("RTC")
+            self._send_line("BNO")
             self._send_line("QUERY")
+            self._send_line("HELP")
             self._event(f"Conectado a {port}; parada de segurança enviada.", "ok")
             return {"ok": True, "message": f"Conectado a {port}"}
         except Exception as exc:
@@ -337,6 +344,15 @@ class MountControllerAPI:
         if self.reader_thread is reader:
             self.reader_thread = None
         self.motion = {"az": "parado", "alt": "parado"}
+        self.fine_tracking_supported = False
+        with self.state_lock:
+            self.moon["aligned"] = False
+            self.rtc["valid"] = False
+            self.rtc_datetime = None
+            self.rtc_updated_at = None
+            self.rtc_protocol = "utc"
+            self.rtc_local_sync_pending = False
+            self.position = {"az": None, "alt": None, "az_counts": None, "alt_counts": None}
         return {"ok": True, "message": "Desconectado; motores parados."}
 
     def _read_loop(self, connection: serial.Serial) -> None:
@@ -360,6 +376,43 @@ class MountControllerAPI:
                 break
 
     def _parse_line(self, line: str) -> None:
+        local_match = RTC_LOCAL_RE.fullmatch(line)
+        if local_match:
+            # O sketch fornecido armazena hora local; converta só para os cálculos.
+            try:
+                rtc_time = datetime.strptime(
+                    local_match.group(1), "%d/%m/%Y %H:%M:%S"
+                ).astimezone(timezone.utc)
+            except ValueError:
+                with self.state_lock:
+                    self.rtc["valid"] = False
+                self._event("RTC: data local inválida recebida.", "error")
+                return
+            if self.rtc_protocol != "local":
+                self.rtc_protocol = "local"
+                self.sync_rtc()
+                return  # A primeira amostra precede o ajuste enviado.
+            if self.rtc_local_sync_pending:
+                if abs((rtc_time - datetime.now(timezone.utc)).total_seconds()) > 3:
+                    if self.rtc_sync_deadline and time.monotonic() > self.rtc_sync_deadline:
+                        self.rtc_sync_deadline = 0.0
+                        self._event("RTC não confirmou a hora do PC. Tente Ajustar RTC pelo PC novamente.", "error")
+                    return  # Aguarde uma leitura que confirme o ajuste.
+                self.rtc_local_sync_pending = False
+                self._event("RTC sincronizado e conferido com o relógio do PC.", "ok")
+            with self.state_lock:
+                self.rtc_datetime = rtc_time
+                self.rtc_updated_at = time.monotonic()
+                self.rtc = {
+                    "available": True, "valid": True,
+                    "utc": rtc_time.isoformat().replace("+00:00", "Z"),
+                    "age_seconds": 0.0,
+                }
+            return
+        if "Erro I2C no RTC" in line or "RTC NAO DETECTADO" in line:
+            with self.state_lock:
+                self.rtc["available"] = False
+                self.rtc["valid"] = False
         match = POSITION_RE.search(line)
         if match:
             altitude = float(match.group(4).replace(",", "."))
@@ -392,7 +445,7 @@ class MountControllerAPI:
                     "sample": self.bno_sample,
                     "age_seconds": 0.0,
                 }
-            # Telemetria chega cinco vezes por segundo; atualize os instrumentos
+            # Telemetria chega uma vez por segundo; atualize os instrumentos
             # sem inundar o console visual.
             return
         elif "BNO:" in line.upper() and "INDISPONIVEL" in line.upper():
@@ -413,11 +466,26 @@ class MountControllerAPI:
                     "utc": rtc_time.isoformat().replace("+00:00", "Z"),
                     "age_seconds": 0.0,
                 }
+            local_time = rtc_time.astimezone().strftime("%d/%m/%Y %H:%M:%S %z")
+            line = f"RTC (hora local do PC): {local_time} OSF={rtc_match.group(2)}"
         elif "RTC:" in line.upper() and "INDISPONIVEL" in line.upper():
             with self.state_lock:
                 self.rtc["available"] = False
                 self.rtc["valid"] = False
         upper = line.upper()
+        if "TRACK_ARCMIN=1" in upper:
+            self.fine_tracking_supported = True
+        if "GOTO: EIXO JA ESTA DENTRO DA TOLERANCIA" in upper or "GOTO CANCELADO" in upper:
+            self.motion = {"az": "parado", "alt": "parado"}
+        if self.moon["tracking"] and (upper.startswith("ERRO:") or "GOTO CANCELADO" in upper):
+            self.tracking_stop.set()
+            self.moon["status"] = line
+            self._send_raw(b"!")
+        if "REINICIALIZACAO SOLICITADA" in upper or "INICIALIZACAO DO CONTROLE" in upper:
+            self.tracking_stop.set()
+            with self.state_lock:
+                self.moon["aligned"] = False
+                self.moon["status"] = "realinhe apos INIT"
         level = "error" if "ERRO" in upper or "AVISO" in upper else "ok" if (
             "PRONTO" in upper or "ALVO ATINGIDO" in upper
         ) else "info"
@@ -442,6 +510,26 @@ class MountControllerAPI:
 
     def query(self) -> dict:
         return self._command("QUERY")
+
+    def sync_rtc(self) -> dict:
+        try:
+            if self.rtc_protocol == "local":
+                now = datetime.now()
+                command = now.strftime("D %d/%m/%Y %H:%M:%S")
+                self.rtc_local_sync_pending = True
+                self.rtc_sync_deadline = time.monotonic() + 5.0
+            else:
+                now = datetime.now(timezone.utc)
+                command = f"RTC SET {now.year} {now.month} {now.day} {now.hour} {now.minute} {now.second}"
+            with self.state_lock:
+                self.rtc["valid"] = False
+            self._send_line(command)
+            message = "Hora do PC enviada ao RTC; aguardando leitura de confirmação."
+            self._event(message)
+            return {"ok": True, "message": message}
+        except Exception as exc:
+            self._event(f"Falha ao sincronizar RTC: {exc}", "error")
+            return {"ok": False, "message": str(exc)}
 
     def initialize_mount(self) -> dict:
         return self._command("INIT")
@@ -488,7 +576,7 @@ class MountControllerAPI:
             self.motion["az" if axis == "AZ" else "alt"] = "parado"
         return result
 
-    def goto(self, axis: str, degrees: float, speed: int) -> dict:
+    def goto(self, axis: str, degrees: float, speed: int, tracking: bool = False) -> dict:
         axis = axis.upper()
         degrees = float(degrees)
         speed = int(speed)
@@ -514,15 +602,17 @@ class MountControllerAPI:
                         f"({minimum:.1f}° a {maximum:.1f}°)."
                     ),
                 }
-        result = self._command(f"{axis} GOTO {degrees:.4f} {speed}")
-        if result["ok"]:
-            key = "az" if axis == "AZ" else "alt"
-            current = self.position[key]
-            if current is None:
-                self.motion[key] = "goto"
-            else:
-                error = (degrees - float(current) + 180.0) % 360.0 - 180.0
-                self.motion[key] = "goto_positivo" if error >= 0 else "goto_negativo"
+        if tracking and not self.fine_tracking_supported:
+            return {"ok": False, "message": "Atualize o firmware para rastreamento em minutos de arco."}
+        key = "az" if axis == "AZ" else "alt"
+        current = self.position[key]
+        # Marque antes do envio: a confirmação serial pode chegar imediatamente.
+        error = _signed_angle(degrees, float(current)) if current is not None else 0.0
+        self.motion[key] = "goto_positivo" if error >= 0 else "goto_negativo"
+        action = "TRACK" if tracking else "GOTO"
+        result = self._command(f"{axis} {action} {degrees:.4f} {speed}")
+        if not result["ok"]:
+            self.motion[key] = "parado"
         return result
 
     def _rtc_now(self) -> datetime | None:
@@ -530,7 +620,8 @@ class MountControllerAPI:
             rtc_time = self.rtc_datetime
             updated_at = self.rtc_updated_at
             valid = bool(self.rtc.get("valid"))
-        if not rtc_time or updated_at is None or not valid:
+        if (not rtc_time or updated_at is None or not valid
+                or time.monotonic() - updated_at > 65.0):
             return None
         return rtc_time + timedelta(seconds=time.monotonic() - updated_at)
 
@@ -550,6 +641,8 @@ class MountControllerAPI:
         moon_az, moon_alt = moon_horizontal_position(
             instant, OBSERVER_LATITUDE, OBSERVER_LONGITUDE
         )
+        if moon_alt <= 0:
+            return {"ok": False, "message": "Lua abaixo do horizonte; alinhamento recusado."}
         offset_az = _signed_angle(float(current_az), moon_az)
         offset_alt = float(current_alt) - moon_alt
         with self.state_lock:
@@ -568,12 +661,15 @@ class MountControllerAPI:
         self._event(message, "ok")
         return {"ok": True, "message": message}
 
-    def start_moon_tracking(self, speed: int = 9) -> dict:
+    def start_moon_tracking(self, speed: int = 4) -> dict:
         speed = int(speed)
         if not 1 <= speed <= 9:
             return {"ok": False, "message": "Velocidade deve estar entre 1 e 9."}
         if not self.serial_port or not self.serial_port.is_open:
             return {"ok": False, "message": "Arduino não conectado."}
+        if not self.fine_tracking_supported:
+            self._send_line("HELP")
+            return {"ok": False, "message": "Firmware sem confirmação TRACK_ARCMIN=1. Grave o controlador atualizado e reconecte."}
         with self.state_lock:
             aligned = bool(self.moon["aligned"])
         if not aligned:
@@ -687,7 +783,9 @@ class MountControllerAPI:
                     ]
                     axis, magnitude, target = max(candidates, key=lambda item: item[1])
                     if magnitude >= MOON_TOLERANCE_DEGREES:
-                        self.goto(axis, target, speed)
+                        result = self.goto(axis, target, speed, tracking=True)
+                        if not result["ok"]:
+                            raise RuntimeError(result["message"])
                     else:
                         self._send_line("QUERY")
                 self.tracking_stop.wait(MOON_UPDATE_SECONDS)

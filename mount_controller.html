@@ -48,12 +48,13 @@
     <span class="moon-title">☾ LUA</span>
     <div class="moon-data">
       <span>LOCAL <b>27,085263° S · 48,919816° O</b></span>
-      <span>RTC <b id="rtcTime">---</b></span>
+      <span title="RTC sincronizado com o PC ao conectar; exibido no fuso horário local do PC">RTC (hora local) <b id="rtcTime">---</b></span>
+      <button class="btn" id="syncRtc">Ajustar RTC pelo PC</button>
       <span>ALVO <b id="moonTarget">AZ --- · ALT ---</b></span>
-      <span>ERRO <b id="moonError">---</b></span>
+      <span title="Correção pelos encoders a partir de 2 minutos de arco; avaliação a cada 1 s. BNO055 auxilia a orientação.">ERRO (′) <b id="moonError">---</b><br>Encoders · limiar 2′ · ciclo 1 s</span>
       <span id="moonState">não alinhado</span>
     </div>
-    <label class="field"><span>VELOC.</span><select id="moonSpeed"><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option>8</option><option selected>9</option></select></label>
+    <label class="field"><span>VELOC.</span><select id="moonSpeed"><option>1</option><option>2</option><option>3</option><option selected>4</option><option>5</option><option>6</option><option>7</option><option>8</option><option>9</option></select></label>
     <button class="btn" id="alignMoon">Alinhar na Lua</button>
     <button class="btn primary" id="trackMoon">Rastrear Lua</button>
     <button class="btn stop-axis" id="stopMoon">Parar</button>
@@ -101,9 +102,10 @@
     };
     function renderConnection(){
       $('#dot').classList.toggle('on',connected);connect.textContent=connected?'Desconectar':'Conectar';port.disabled=connected;
-      $$('#query,.hold,.goto-btn,.stop-axis').forEach(el=>el.disabled=!connected);
+      $$('#query,#syncRtc,.hold,.goto-btn,.stop-axis').forEach(el=>el.disabled=!connected);
     }
     $('#query').onclick=async()=>{const r=await call('query');show(r.message,r.ok?'ok':'error')};
+    $('#syncRtc').onclick=async()=>{const r=await call('sync_rtc');show(r.message,r.ok?'ok':'error')};
     $('#alignMoon').onclick=async()=>{const r=await call('align_moon');show(r.message,r.ok?'ok':'error')};
     $('#trackMoon').onclick=async()=>{const r=await call('start_moon_tracking',[Number($('#moonSpeed').value)]);show(r.message,r.ok?'ok':'error')};
     $('#stopMoon').onclick=async()=>{const r=await call('stop_moon_tracking');show(r.message,r.ok?'ok':'error')};
@@ -220,9 +222,11 @@
       updateAxis('az',state.position.az,state.position.az_counts,state.motion.az);updateAxis('alt',state.position.alt,state.position.alt_counts,state.motion.alt);appendMessages(state.messages);
       updateBno(state.bno);
       const rtc=state.rtc||{},moon=state.moon||{},fmt=n=>Number.isFinite(n)?`${Number(n).toFixed(2)}°`:'---';
-      $('#rtcTime').textContent=rtc.valid&&rtc.utc?rtc.utc.replace('T',' ').replace(/\.\d+Z$/,'Z'):'inválido';
+      $('#rtcTime').textContent=rtc.valid&&rtc.utc?new Date(rtc.utc).toLocaleString('pt-BR',{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}):'inválido';
+      $('#rtcTime').title=rtc.utc?`Horário UTC do RTC: ${rtc.utc}`:'';
       $('#moonTarget').textContent=`AZ ${fmt(moon.target_az??moon.az)} · ALT ${fmt(moon.target_alt??moon.alt)}`;
-      $('#moonError').textContent=`AZ ${fmt(moon.error_az)} · ALT ${fmt(moon.error_alt)}`;
+      const arcmin=n=>Number.isFinite(n)?`${(n*60).toFixed(2)}′`:'---';
+      $('#moonError').textContent=`AZ ${arcmin(moon.error_az)} · ALT ${arcmin(moon.error_alt)}`;
       $('#moonState').textContent=moon.tracking?'RASTREANDO':moon.aligned?(moon.status||'alinhado'):'não alinhado';
       $('#moonState').classList.toggle('tracking',!!moon.tracking);
       $('#alignMoon').disabled=!connected||!!moon.tracking;$('#trackMoon').disabled=!connected||!!moon.tracking;$('#stopMoon').disabled=!connected||!moon.tracking;

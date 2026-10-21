@@ -28,12 +28,82 @@ o motor durante a inicialização.
 ## Comunicação
 
 O USB recebe comandos a 115.200 baud. A montagem utiliza `Serial1` a
-57.600 baud, 8N1. Este firmware controla somente a montagem: não utiliza
-BNO055, RTC ou barramento I²C. Os comandos `BNO`, `RTC` e `RTC SET` foram
-removidos; `QUERY` retorna apenas as posições dos encoders.
+57.600 baud, 8N1. BNO055 usa I²C de hardware em D20/D21. O RTC HW-84 **com chip DS3231**
+usa um barramento I²C por software separado em D22/D23. Confira a marcação DS3231 no módulo: o código
+não implementa DS1307 ou outros RTCs.
 
-A interface Python ainda possui recursos dependentes desses sensores.
-O rastreamento lunar que exige RTC não está disponível com este firmware.
+### Sensores em outros pinos
+
+| Mega | Sensor |
+|---|---|
+| D20 | SDA do BNO055 |
+| D21 | SCL do BNO055 |
+| D22 | SDA do DS3231 |
+| D23 | SCL do DS3231 |
+| GND | GND dos dois módulos |
+
+Os pinos do RTC podem ser alterados em `sensors.h` (`SENSOR_SDA_PIN` e
+`SENSOR_SCL_PIN`). Não use D18/D19, reservados à montagem. D20/D21 são reservados ao BNO055.
+O BNO055 usa a biblioteca Wire do core Arduino AVR. Para o RTC usamos **SoftwareWire 1.6.0**
+(instale pelo Gerenciador de Bibliotecas). Não são necessárias Adafruit BNO055
+ou RTClib. Os dois barramentos operam a 50 kHz com timeout de 5 ms; o Wire suporta
+clock stretching do BNO055. Use Arduino AVR Boards 1.8.6 ou posterior.
+
+Use conversor de nível I²C bidirecional entre o Mega (lado 5 V) e sensores
+(lado 3,3 V), com pull-ups externos em ambos os lados. Os pull-ups internos
+estão desabilitados. Confira a alimentação permitida no breakout BNO055;
+o chip não tolera sinais de 5 V. Não permita que pull-ups do módulo RTC a 5 V
+cheguem diretamente ao BNO055. Verifique também o circuito de carga do HW-84
+antes de usar uma pilha CR2032 não recarregável.
+
+O BNO é detectado em 0x28 ou 0x29 e opera em NDOF, com heading/roll/pitch em
+graus e calibração 0–3. Sua orientação é auxiliar: não substitui o alinhamento
+óptico, nem representa automaticamente o norte verdadeiro. Instale longe dos
+motores e calibre o sensor. A telemetria é enviada uma vez por segundo.
+Se não for detectado ao ligar, confira a fiação e reinicie o Mega.
+
+O RTC em 0x68 usa UTC e informa OSF (perda de validade do relógio).
+`RTC SET` valida a data e limpa OSF somente após ajuste. A interface sincroniza
+o RTC com o relógio UTC do computador ao conectar. Mantenha o relógio do PC correto.
+
+A interface também reconhece o sketch independente de RTC que imprime
+`Blumenau | DD/MM/AAAA HH:MM:SS BRT`. Nesse modo, envia automaticamente
+`D DD/MM/AAAA HH:MM:SS` com a hora local atual do PC e aguarda uma leitura
+com diferença de até três segundos para confirmar o ajuste. O botão
+**Ajustar RTC pelo PC** repete o envio. Não utiliza a hora da compilação.
+Configure o PC no fuso local desejado; o rótulo BRT desse sketch é fixo.
+Esse sketch não oferece controle dos motores ou telemetria BNO055.
+
+### Acompanhar a Lua em montagem altazimutal
+
+1. Grave o firmware para Mega 2560 e execute `iniciar_montagem.bat`.
+2. Conecte a porta USB e confira RTC válido, encoders e os limites de elevação.
+3. Confira `OBSERVER_LATITUDE` e `OBSERVER_LONGITUDE` em `mount_controller.py`:
+   os valores existentes são **-27.085263, -48.919816** (graus, leste positivo).
+4. Nivele a base, centralize a Lua manualmente e clique em **Alinhar na Lua**.
+5. Inicie **Rastrear Lua** e mantenha o computador conectado. Parar/emergência
+   interrompe o acompanhamento. Após reconectar ou executar INIT, alinhe novamente.
+
+O Python calcula azimute/altitude topocêntricos aproximados e corrige o eixo
+com maior erro, alternando os eixos; não aplica uma velocidade equatorial fixa.
+O firmware continua controlando um eixo por vez. O BNO serve aos instrumentos
+da interface e o RTC fornece o instante do cálculo.
+
+**Controle em minutos de arco:** avaliação a cada 1 s, limiar de correção 2′
+(0,033333°) e tolerância de parada 1′ no comando `AZ/ALT TRACK`. O GOTO manual
+continua com tolerância 0,75°. A velocidade inicial do rastreamento é 4, uma das
+velocidades observadas nas capturas; não há taxa angular calibrada. A consulta
+do firmware permanece em 285 ms e a parada também ocorre ao cruzar o alvo.
+Esses limiares não garantem precisão física de 1′: folga, overshoot e velocidade
+precisam ser medidos na montagem. Não há comando de taxa contínua calibrada.
+A montagem altazimutal também apresenta rotação de campo. A perda de telemetria
+RTC por mais de 65 s interrompe o rastreamento. O limite de elevação padrão
+35–85° refere-se aos encoders, não necessariamente à altitude celeste.
+
+Fontes: [Mega/I²C](https://docs.arduino.cc/learn/communication/wire),
+[BNO055](https://www.bosch-sensortec.com/media/boschsensortec/downloads/datasheets/bst-bno055-ds000.pdf),
+[DS3231](https://www.analog.com/media/en/technical-documentation/data-sheets/DS3231.pdf),
+[SoftwareWire](https://github.com/Testato/SoftwareWire).
 
 ## Comandos
 
@@ -41,6 +111,9 @@ Abra o Monitor Serial em 115.200 baud com final de linha habilitado:
 
 ```text
 QUERY
+BNO
+RTC
+RTC SET 2026 10 21 0 0 0
 AZ POS 9
 AZ NEG 9
 ALT POS 9
@@ -159,3 +232,22 @@ Teste `QUERY`, depois um movimento curto `AZ POS 4` seguido de `STOP`,
 e novamente `QUERY`. Capture D18/D19 para comparar os quadros e verificar
 se a comunicação permanece ativa. A compilação e análise offline não
 substituem esse teste físico; o firmware não foi gravado automaticamente.
+
+### Atualização do rastreamento em minutos de arco
+
+Grave o firmware atualizado no Mega e reabra o LogicLab. O app consulta `HELP`
+e exige a identificação `TRACK_ARCMIN=1` antes de iniciar o rastreamento.
+Firmware antigo ou sketch independente de RTC não implementam esse comando.
+Centralize a Lua, clique em Alinhar na Lua e depois em Rastrear Lua. O erro
+mostrado está em minutos de arco; posições e alvos continuam em graus.
+
+A referência das correções é o encoder de cada eixo, após alinhamento óptico.
+O BNO055 continua como orientação auxiliar: a saída Euler usada tem 16 LSB/°,
+ou 3,75′ por passo, e não confirma correções de 1′. Nenhum pitch/roll é assumido
+como eixo óptico sem conhecer a instalação física do sensor.
+
+Validação de bancada: conferir a confirmação de TRACK, o erro após a parada e
+se ambos os eixos recebem correções. Se houver oscilação, a tolerância numérica
+não resolve a dinâmica: medir velocidades, folga e distância de parada antes
+de reduzir mais o limiar. A compilação e os testes simulados não substituem
+esta validação física.
